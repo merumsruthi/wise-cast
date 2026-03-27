@@ -24,7 +24,6 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
@@ -32,10 +31,14 @@ Deno.serve(async (req) => {
 
     // ─── LOGIN ───
     if (action === "login") {
-      const { roll_number, phone } = body;
+      const { roll_number, phone, role } = body;
 
       if (!roll_number || !phone) {
         return jsonResponse({ error: "Roll number and phone number are required" }, 400);
+      }
+
+      if (!role) {
+        return jsonResponse({ error: "Please select your role" }, 400);
       }
 
       // Validate credentials against profiles table
@@ -44,33 +47,31 @@ Deno.serve(async (req) => {
         .select("*")
         .eq("roll_number", roll_number)
         .eq("phone", phone)
-        .single();
+        .maybeSingle();
 
       if (profileError || !profile) {
         return jsonResponse({ error: "Invalid roll number or phone number. Please check your credentials." }, 401);
       }
 
-      // Fetch roles
-      const { data: roles } = await supabaseAdmin
+      // Fetch user roles
+      const { data: userRoles } = await supabaseAdmin
         .from("user_roles")
         .select("role")
         .eq("user_id", profile.user_id);
 
-      // Sign in with synthetic credentials using admin client
+      const rolesList = userRoles?.map((r: any) => r.role) ?? [];
+
+      // Validate that user has the selected role
+      if (!rolesList.includes(role)) {
+        return jsonResponse({ 
+          error: `You are not registered as a ${role.replace('_', ' ')}. Please select the correct role.` 
+        }, 403);
+      }
+
+      // Sign in with synthetic credentials
       const syntheticEmail = `${roll_number.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
       const syntheticPassword = `cv_${phone}_${roll_number}`;
 
-      // Use admin generateLink to create a sign-in, then use anon client
-      // Instead, use admin to get user and sign in via service role
-      const { data: userList } = await supabaseAdmin.auth.admin.listUsers();
-      const authUser = userList?.users?.find((u) => u.email === syntheticEmail);
-      
-      if (!authUser) {
-        return jsonResponse({ error: "Auth user not found. Contact administrator." }, 401);
-      }
-
-      // Generate a new session via admin
-      // We'll use signInWithPassword with the service role client which bypasses rate limits
       const supabaseClient = createClient(supabaseUrl, serviceRoleKey, {
         auth: { autoRefreshToken: false, persistSession: false },
       });
@@ -89,7 +90,8 @@ Deno.serve(async (req) => {
         session: authData.session,
         user: authData.user,
         profile,
-        roles: roles?.map((r) => r.role) ?? [],
+        roles: rolesList,
+        selectedRole: role,
       });
     }
 
@@ -107,7 +109,7 @@ Deno.serve(async (req) => {
         .select("role")
         .eq("user_id", caller.id);
 
-      if (!callerRoles?.some((r) => r.role === "admin")) {
+      if (!callerRoles?.some((r: any) => r.role === "admin")) {
         return jsonResponse({ error: "Admin access required" }, 403);
       }
 
@@ -122,7 +124,7 @@ Deno.serve(async (req) => {
         .from("profiles")
         .select("id")
         .eq("roll_number", roll_number)
-        .single();
+        .maybeSingle();
 
       if (existing) {
         return jsonResponse({ error: "A user with this roll number already exists" }, 409);
@@ -145,7 +147,7 @@ Deno.serve(async (req) => {
       }
 
       // Update profile with roll_number, phone, class
-      const { error: profileError } = await supabaseAdmin
+      await supabaseAdmin
         .from("profiles")
         .update({
           roll_number,
@@ -154,10 +156,6 @@ Deno.serve(async (req) => {
           full_name: name,
         })
         .eq("user_id", newUser.user.id);
-
-      if (profileError) {
-        console.error("Profile update error:", profileError.message);
-      }
 
       // Set user role (delete default 'student' if different)
       if (role !== "student") {
@@ -172,6 +170,72 @@ Deno.serve(async (req) => {
       }
 
       return jsonResponse({ success: true, user_id: newUser.user.id });
+    }
+
+    // ─── SEED USERS (one-time setup) ───
+    if (action === "seed_users") {
+      const users = [
+        { name: "Rahul Sharma", roll: "CS2024001", phone: "9876543001", role: "student", userClass: "CS-A" },
+        { name: "Priya Patel", roll: "CS2024002", phone: "9876543002", role: "student", userClass: "CS-B" },
+        { name: "Dr. Amit Kumar", roll: "ADMIN001", phone: "1234567890", role: "admin", userClass: null },
+        { name: "Prof. Sunita Verma", roll: "TCH001", phone: "9876543100", role: "class_teacher", userClass: "CS-A" },
+      ];
+
+      const results = [];
+
+      for (const u of users) {
+        const syntheticEmail = `${u.roll.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
+        const syntheticPassword = `cv_${u.phone}_${u.roll}`;
+
+        // Check if already exists
+        const { data: existing } = await supabaseAdmin
+          .from("profiles")
+          .select("id")
+          .eq("roll_number", u.roll)
+          .maybeSingle();
+
+        if (existing) {
+          // Update existing profile
+          await supabaseAdmin
+            .from("profiles")
+            .update({ full_name: u.name, phone: u.phone, class: u.userClass })
+            .eq("roll_number", u.roll);
+          results.push({ roll: u.roll, status: "already_exists_updated" });
+          continue;
+        }
+
+        const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
+          email: syntheticEmail,
+          password: syntheticPassword,
+          email_confirm: true,
+          user_metadata: { full_name: u.name },
+        });
+
+        if (createError) {
+          results.push({ roll: u.roll, status: "error", message: createError.message });
+          continue;
+        }
+
+        await supabaseAdmin
+          .from("profiles")
+          .update({ roll_number: u.roll, phone: u.phone, class: u.userClass, full_name: u.name })
+          .eq("user_id", newUser.user.id);
+
+        if (u.role !== "student") {
+          await supabaseAdmin
+            .from("user_roles")
+            .delete()
+            .eq("user_id", newUser.user.id);
+
+          await supabaseAdmin
+            .from("user_roles")
+            .insert({ user_id: newUser.user.id, role: u.role });
+        }
+
+        results.push({ roll: u.roll, status: "created" });
+      }
+
+      return jsonResponse({ success: true, results });
     }
 
     return jsonResponse({ error: "Invalid action" }, 400);

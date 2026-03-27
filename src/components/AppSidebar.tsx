@@ -1,4 +1,4 @@
-import { Vote, LayoutDashboard, Users, Trophy, LogOut, Settings } from "lucide-react";
+import { Vote, LayoutDashboard, Users, Trophy, LogOut, Settings, GraduationCap, Shield, BookOpen } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -15,15 +15,28 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+
+const roleLabels: Record<string, string> = {
+  student: "Student",
+  admin: "Admin",
+  class_teacher: "Class Teacher",
+};
+
+const roleIcons: Record<string, any> = {
+  student: GraduationCap,
+  admin: Shield,
+  class_teacher: BookOpen,
+};
 
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
-  const { roles, profile, signOut } = useAuth();
-  const location = useLocation();
+  const { roles, activeRole, profile, signOut } = useAuth();
 
-  const isAdmin = roles.includes("admin");
-  const isTeacher = roles.includes("class_teacher");
+  const isAdmin = activeRole === "admin";
+  const isTeacher = activeRole === "class_teacher";
+  const isStudent = activeRole === "student";
 
   const studentItems = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -42,6 +55,8 @@ export function AppSidebar() {
     { title: "Class Results", url: "/dashboard/teacher/results", icon: Trophy },
   ];
 
+  const RoleIcon = activeRole ? roleIcons[activeRole] : GraduationCap;
+
   return (
     <Sidebar collapsible="icon">
       <SidebarContent>
@@ -50,23 +65,35 @@ export function AppSidebar() {
           {!collapsed && <span className="font-heading text-lg font-bold text-sidebar-foreground">CampusVote</span>}
         </div>
 
-        <SidebarGroup>
-          <SidebarGroupLabel>Student</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {studentItems.map((item) => (
-                <SidebarMenuItem key={item.url}>
-                  <SidebarMenuButton asChild>
-                    <NavLink to={item.url} end className="hover:bg-sidebar-accent/50" activeClassName="bg-sidebar-accent text-sidebar-primary font-medium">
-                      <item.icon className="mr-2 h-4 w-4" />
-                      {!collapsed && <span>{item.title}</span>}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {/* Active role indicator */}
+        {!collapsed && activeRole && (
+          <div className="px-4 pb-2">
+            <Badge variant="secondary" className="w-full justify-center gap-1 py-1 text-xs">
+              <RoleIcon className="h-3 w-3" />
+              {roleLabels[activeRole]}
+            </Badge>
+          </div>
+        )}
+
+        {isStudent && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Student</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {studentItems.map((item) => (
+                  <SidebarMenuItem key={item.url}>
+                    <SidebarMenuButton asChild>
+                      <NavLink to={item.url} end className="hover:bg-sidebar-accent/50" activeClassName="bg-sidebar-accent text-sidebar-primary font-medium">
+                        <item.icon className="mr-2 h-4 w-4" />
+                        {!collapsed && <span>{item.title}</span>}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
         {isAdmin && (
           <SidebarGroup>
@@ -111,7 +138,10 @@ export function AppSidebar() {
 
       <SidebarFooter className="p-3">
         {!collapsed && profile && (
-          <p className="text-xs text-sidebar-foreground/60 mb-2 truncate px-2">{profile.full_name}</p>
+          <div className="px-2 mb-2">
+            <p className="text-xs font-medium text-sidebar-foreground truncate">{profile.full_name}</p>
+            <p className="text-xs text-sidebar-foreground/50 truncate">{profile.roll_number}</p>
+          </div>
         )}
         <Button
           variant="ghost"

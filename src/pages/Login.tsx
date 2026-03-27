@@ -5,11 +5,25 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Vote, AlertCircle } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Vote, AlertCircle, GraduationCap, Shield, BookOpen } from "lucide-react";
+
+const roleOptions = [
+  { value: "student", label: "Student", icon: GraduationCap, desc: "Vote in elections" },
+  { value: "admin", label: "Admin", icon: Shield, desc: "Manage elections & users" },
+  { value: "class_teacher", label: "Class Teacher", icon: BookOpen, desc: "Manage CR elections" },
+];
+
+const roleDashboardMap: Record<string, string> = {
+  student: "/dashboard",
+  admin: "/dashboard/admin",
+  class_teacher: "/dashboard/teacher",
+};
 
 const Login = () => {
   const [rollNumber, setRollNumber] = useState("");
   const [phone, setPhone] = useState("");
+  const [role, setRole] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -18,16 +32,22 @@ const Login = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+
+    if (!role) {
+      setError("Please select your role.");
+      return;
+    }
+
     setLoading(true);
 
-    const result = await loginWithRollNumber(rollNumber, phone);
-    
+    const result = await loginWithRollNumber(rollNumber, phone, role);
+
     if (result.error) {
       setError(result.error);
     } else {
-      navigate("/dashboard");
+      navigate(roleDashboardMap[role] || "/dashboard");
     }
-    
+
     setLoading(false);
   };
 
@@ -41,16 +61,42 @@ const Login = () => {
         <Card className="glass-card">
           <CardHeader className="text-center">
             <CardTitle className="font-heading text-2xl">Welcome Back</CardTitle>
-            <CardDescription>Log in with your roll number and phone number</CardDescription>
+            <CardDescription>Select your role and enter your credentials</CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-5">
               {error && (
                 <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
                   <AlertCircle className="h-4 w-4 shrink-0" />
                   <span>{error}</span>
                 </div>
               )}
+
+              {/* Role Selection */}
+              <div className="space-y-2">
+                <Label>Login As</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  {roleOptions.map((r) => {
+                    const isSelected = role === r.value;
+                    return (
+                      <button
+                        key={r.value}
+                        type="button"
+                        onClick={() => setRole(r.value)}
+                        className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 transition-all text-center ${
+                          isSelected
+                            ? "border-primary bg-primary/5 text-primary shadow-sm"
+                            : "border-border bg-card hover:border-primary/30 text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        <r.icon className={`h-5 w-5 ${isSelected ? "text-primary" : ""}`} />
+                        <span className="text-xs font-medium">{r.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="rollNumber">Roll Number</Label>
                 <Input
