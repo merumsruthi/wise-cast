@@ -6,56 +6,61 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+function jsonResponse(body: object, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { roll_number, phone, action } = await req.json();
+    const body = await req.json();
+    const { action } = body;
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
+    // ─── LOGIN ───
     if (action === "login") {
+      const { roll_number, phone } = body;
+
       if (!roll_number || !phone) {
-        return new Response(
-          JSON.stringify({ error: "Roll number and phone number are required" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return jsonResponse({ error: "Roll number and phone number are required" }, 400);
       }
 
-      // Look up user by roll_number and phone
+      // Validate credentials against profiles table
       const { data: profile, error: profileError } = await supabaseAdmin
         .from("profiles")
-        .select("*, user_roles(role)")
+        .select("*")
         .eq("roll_number", roll_number)
         .eq("phone", phone)
         .single();
 
       if (profileError || !profile) {
-        return new Response(
-          JSON.stringify({ error: "Invalid roll number or phone number. Please check your credentials." }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return jsonResponse({ error: "Invalid roll number or phone number. Please check your credentials." }, 401);
       }
 
-      // Sign in using synthetic email + password
+      // Fetch roles
+      const { data: roles } = await supabaseAdmin
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", profile.user_id);
+
+      // Sign in with synthetic credentials
       const syntheticEmail = `${roll_number.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
       const syntheticPassword = `cv_${phone}_${roll_number}`;
 
-      const { data: signInData, error: signInError } = await supabaseAdmin.auth.admin.generateLink({
-        type: "magiclink",
-        email: syntheticEmail,
-      });
-
-      // Use signInWithPassword instead - the auth user should already exist
-      // Create a regular client to sign in
-      const supabaseClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!, {
+      const supabaseClient = createClient(supabaseUrl, anonKey, {
         auth: { autoRefreshToken: false, persistSession: false },
       });
 
@@ -65,80 +70,102 @@ Deno.serve(async (req) => {
       });
 
       if (authError) {
-        console.error("Auth sign-in error:", authError.message);
-        return new Response(
-          JSON.stringify({ error: "Authentication failed. Please contact your administrator." }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        console.error("Auth error:", authError.message);
+        return jsonResponse({ error: "Authentication failed. Contact your administrator." }, 401);
       }
 
-      return new Response(
-        JSON.stringify({
-          session: authData.session,
-          user: authData.user,
-          profile,
-        }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({
+        session: authData.session,
+        user: authData.user,
+        profile,
+        roles: roles?.map((r) => r.role) ?? [],
+      });
     }
 
+    // ─── CREATE USER (admin only) ───
     if (action === "create_user") {
-      // Verify the caller is an admin
       const authHeader = req.headers.get("Authorization");
-      if (!authHeader) {
-        return new Response(
-          JSON.stringify({ error: "Authorization required" }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
+      if (!authHeader) return jsonResponse({ error: "Authorization required" }, 401);
 
       const token = authHeader.replace("Bearer ", "");
-      const { data: { user: callerUser }, error: callerError } = await supabaseAdmin.auth.getUser(token);
-      
-      if (callerError || !callerUser) {
-        return new Response(
-          JSON.stringify({ error: "Invalid token" }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
+      const { data: { user: caller } } = await supabaseAdmin.auth.getUser(token);
+      if (!caller) return jsonResponse({ error: "Invalid token" }, 401);
 
-      // Check admin role
       const { data: callerRoles } = await supabaseAdmin
         .from("user_roles")
         .select("role")
-        .eq("user_id", callerUser.id);
+        .eq("user_id", caller.id);
 
-      const isAdmin = callerRoles?.some((r) => r.role === "admin");
-      if (!isAdmin) {
-        return new Response(
-          JSON.stringify({ error: "Admin access required" }),
-          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+      if (!callerRoles?.some((r) => r.role === "admin")) {
+        return jsonResponse({ error: "Admin access required" }, 403);
       }
 
-      const { name, role, class: userClass } = await Promise.resolve({ name: "", role: "", class: "" }).then(() => {
-        // Already destructured from the original request body, re-parse isn't needed
-        // The values come from the initial parse
-        return { name: "", role: "", class: "" };
+      const { name, roll_number, phone, role, user_class } = body;
+
+      if (!name || !roll_number || !phone || !role) {
+        return jsonResponse({ error: "Name, roll number, phone, and role are required" }, 400);
+      }
+
+      // Check for duplicate roll number
+      const { data: existing } = await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .eq("roll_number", roll_number)
+        .single();
+
+      if (existing) {
+        return jsonResponse({ error: "A user with this roll number already exists" }, 409);
+      }
+
+      // Create auth user with synthetic credentials
+      const syntheticEmail = `${roll_number.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
+      const syntheticPassword = `cv_${phone}_${roll_number}`;
+
+      const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
+        email: syntheticEmail,
+        password: syntheticPassword,
+        email_confirm: true,
+        user_metadata: { full_name: name },
       });
 
-      // This won't work - need to get values from the request body
-      // Let me restructure: the body already has these fields
-      return new Response(
-        JSON.stringify({ error: "Use the create-user action with all fields" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      if (createError) {
+        console.error("Create user error:", createError.message);
+        return jsonResponse({ error: "Failed to create user: " + createError.message }, 500);
+      }
+
+      // Update profile with roll_number, phone, class
+      const { error: profileError } = await supabaseAdmin
+        .from("profiles")
+        .update({
+          roll_number,
+          phone,
+          class: user_class || null,
+          full_name: name,
+        })
+        .eq("user_id", newUser.user.id);
+
+      if (profileError) {
+        console.error("Profile update error:", profileError.message);
+      }
+
+      // Set user role (delete default 'student' if different)
+      if (role !== "student") {
+        await supabaseAdmin
+          .from("user_roles")
+          .delete()
+          .eq("user_id", newUser.user.id);
+
+        await supabaseAdmin
+          .from("user_roles")
+          .insert({ user_id: newUser.user.id, role });
+      }
+
+      return jsonResponse({ success: true, user_id: newUser.user.id });
     }
 
-    return new Response(
-      JSON.stringify({ error: "Invalid action" }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ error: "Invalid action" }, 400);
   } catch (error) {
     console.error("Edge function error:", error);
-    return new Response(
-      JSON.stringify({ error: "Internal server error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ error: "Internal server error" }, 500);
   }
 });
