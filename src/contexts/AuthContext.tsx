@@ -20,6 +20,7 @@ interface AuthContextType {
   roles: AppRole[];
   loading: boolean;
   signOut: () => Promise<void>;
+  loginWithRollNumber: (rollNumber: string, phone: string) => Promise<{ error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -29,6 +30,7 @@ const AuthContext = createContext<AuthContextType>({
   roles: [],
   loading: true,
   signOut: async () => {},
+  loginWithRollNumber: async () => ({}),
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -76,6 +78,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  const loginWithRollNumber = async (rollNumber: string, phone: string): Promise<{ error?: string }> => {
+    try {
+      const { data, error } = await supabase.functions.invoke("auth-login", {
+        body: { action: "login", roll_number: rollNumber, phone },
+      });
+
+      if (error) {
+        return { error: "Login failed. Please try again." };
+      }
+
+      if (data?.error) {
+        return { error: data.error };
+      }
+
+      if (data?.session) {
+        // Set the session in Supabase client
+        await supabase.auth.setSession({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+        });
+        return {};
+      }
+
+      return { error: "Unexpected error occurred." };
+    } catch (err: any) {
+      return { error: err.message || "Login failed." };
+    }
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
     setUser(null);
@@ -85,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, roles, loading, signOut }}>
+    <AuthContext.Provider value={{ user, session, profile, roles, loading, signOut, loginWithRollNumber }}>
       {children}
     </AuthContext.Provider>
   );
