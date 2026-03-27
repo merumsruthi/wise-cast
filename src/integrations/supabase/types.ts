@@ -195,6 +195,7 @@ export type Database = {
       get_election_results: {
         Args: { p_election_id: string }
         Returns: {
+          candidate_class: string
           candidate_id: string
           candidate_name: string
           role_title: string
