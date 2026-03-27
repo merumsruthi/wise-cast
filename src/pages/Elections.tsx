@@ -87,8 +87,12 @@ const Elections = () => {
     queryFn: async () => {
       const { data } = await supabase
         .from("votes")
-        .select("election_id, role_title, candidate_id");
-      return data ?? [];
+        .select("election_id, candidate_id");
+      // Fetch role_title separately since types may not be updated yet
+      const { data: fullData } = await supabase
+        .from("votes")
+        .select("*") as { data: Array<{ election_id: string; candidate_id: string; role_title: string | null }> | null };
+      return fullData ?? [];
     },
   });
 
