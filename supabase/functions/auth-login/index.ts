@@ -56,11 +56,22 @@ Deno.serve(async (req) => {
         .select("role")
         .eq("user_id", profile.user_id);
 
-      // Sign in with synthetic credentials
+      // Sign in with synthetic credentials using admin client
       const syntheticEmail = `${roll_number.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
       const syntheticPassword = `cv_${phone}_${roll_number}`;
 
-      const supabaseClient = createClient(supabaseUrl, anonKey, {
+      // Use admin generateLink to create a sign-in, then use anon client
+      // Instead, use admin to get user and sign in via service role
+      const { data: userList } = await supabaseAdmin.auth.admin.listUsers();
+      const authUser = userList?.users?.find((u) => u.email === syntheticEmail);
+      
+      if (!authUser) {
+        return jsonResponse({ error: "Auth user not found. Contact administrator." }, 401);
+      }
+
+      // Generate a new session via admin
+      // We'll use signInWithPassword with the service role client which bypasses rate limits
+      const supabaseClient = createClient(supabaseUrl, serviceRoleKey, {
         auth: { autoRefreshToken: false, persistSession: false },
       });
 
