@@ -14,16 +14,205 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      candidates: {
+        Row: {
+          class: string | null
+          created_at: string
+          election_id: string
+          id: string
+          manifesto: string | null
+          name: string
+          photo_url: string | null
+          role_title: string
+          user_id: string | null
+        }
+        Insert: {
+          class?: string | null
+          created_at?: string
+          election_id: string
+          id?: string
+          manifesto?: string | null
+          name: string
+          photo_url?: string | null
+          role_title: string
+          user_id?: string | null
+        }
+        Update: {
+          class?: string | null
+          created_at?: string
+          election_id?: string
+          id?: string
+          manifesto?: string | null
+          name?: string
+          photo_url?: string | null
+          role_title?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "candidates_election_id_fkey"
+            columns: ["election_id"]
+            isOneToOne: false
+            referencedRelation: "elections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      elections: {
+        Row: {
+          class: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          election_type: Database["public"]["Enums"]["election_type"]
+          end_date: string | null
+          id: string
+          start_date: string | null
+          status: Database["public"]["Enums"]["election_status"]
+          title: string
+        }
+        Insert: {
+          class?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          election_type: Database["public"]["Enums"]["election_type"]
+          end_date?: string | null
+          id?: string
+          start_date?: string | null
+          status?: Database["public"]["Enums"]["election_status"]
+          title: string
+        }
+        Update: {
+          class?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          election_type?: Database["public"]["Enums"]["election_type"]
+          end_date?: string | null
+          id?: string
+          start_date?: string | null
+          status?: Database["public"]["Enums"]["election_status"]
+          title?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          class: string | null
+          created_at: string
+          full_name: string
+          id: string
+          phone: string | null
+          roll_number: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          class?: string | null
+          created_at?: string
+          full_name: string
+          id?: string
+          phone?: string | null
+          roll_number?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          class?: string | null
+          created_at?: string
+          full_name?: string
+          id?: string
+          phone?: string | null
+          roll_number?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      votes: {
+        Row: {
+          candidate_id: string
+          created_at: string
+          election_id: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          candidate_id: string
+          created_at?: string
+          election_id: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          candidate_id?: string
+          created_at?: string
+          election_id?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "votes_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "candidates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "votes_election_id_fkey"
+            columns: ["election_id"]
+            isOneToOne: false
+            referencedRelation: "elections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_election_results: {
+        Args: { p_election_id: string }
+        Returns: {
+          candidate_id: string
+          candidate_name: string
+          role_title: string
+          vote_count: number
+        }[]
+      }
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "student" | "admin" | "class_teacher"
+      election_status: "upcoming" | "active" | "completed"
+      election_type: "council" | "cr"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +339,10 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["student", "admin", "class_teacher"],
+      election_status: ["upcoming", "active", "completed"],
+      election_type: ["council", "cr"],
+    },
   },
 } as const
