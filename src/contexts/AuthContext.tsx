@@ -18,9 +18,10 @@ interface AuthContextType {
   session: Session | null;
   profile: Profile | null;
   roles: AppRole[];
+  activeRole: AppRole | null;
   loading: boolean;
   signOut: () => Promise<void>;
-  loginWithRollNumber: (rollNumber: string, phone: string) => Promise<{ error?: string }>;
+  loginWithRollNumber: (rollNumber: string, phone: string, role: string) => Promise<{ error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -28,6 +29,7 @@ const AuthContext = createContext<AuthContextType>({
   session: null,
   profile: null,
   roles: [],
+  activeRole: null,
   loading: true,
   signOut: async () => {},
   loginWithRollNumber: async () => ({}),
@@ -40,15 +42,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
+  const [activeRole, setActiveRole] = useState<AppRole | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchUserData = async (userId: string) => {
     const [profileRes, rolesRes] = await Promise.all([
-      supabase.from("profiles").select("*").eq("user_id", userId).single(),
+      supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle(),
       supabase.from("user_roles").select("role").eq("user_id", userId),
     ]);
     if (profileRes.data) setProfile(profileRes.data as Profile);
-    if (rolesRes.data) setRoles(rolesRes.data.map((r) => r.role as AppRole));
+    if (rolesRes.data) {
+      const fetchedRoles = rolesRes.data.map((r) => r.role as AppRole);
+      setRoles(fetchedRoles);
+      // Restore active role from sessionStorage if available
+      const stored = sessionStorage.getItem("campusvote_active_role");
+      if (stored && fetchedRoles.includes(stored as AppRole)) {
+        setActiveRole(stored as AppRole);
+      } else if (fetchedRoles.length > 0 && !activeRole) {
+        setActiveRole(fetchedRoles[0]);
+      }
+    }
   };
 
   useEffect(() => {
@@ -61,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           setProfile(null);
           setRoles([]);
+          setActiveRole(null);
         }
         setLoading(false);
       }
@@ -78,10 +92,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const loginWithRollNumber = async (rollNumber: string, phone: string): Promise<{ error?: string }> => {
+  const loginWithRollNumber = async (rollNumber: string, phone: string, role: string): Promise<{ error?: string }> => {
     try {
       const { data, error } = await supabase.functions.invoke("auth-login", {
-        body: { action: "login", roll_number: rollNumber, phone },
+        body: { action: "login", roll_number: rollNumber, phone, role },
       });
 
       if (error) {
@@ -93,7 +107,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (data?.session) {
-        // Set the session in Supabase client
+        // Set active role from login selection
+        setActiveRole(role as AppRole);
+        sessionStorage.setItem("campusvote_active_role", role);
+
         await supabase.auth.setSession({
           access_token: data.session.access_token,
           refresh_token: data.session.refresh_token,
@@ -113,10 +130,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
     setProfile(null);
     setRoles([]);
+    setActiveRole(null);
+    sessionStorage.removeItem("campusvote_active_role");
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, roles, loading, signOut, loginWithRollNumber }}>
+    <AuthContext.Provider value={{ user, session, profile, roles, activeRole, loading, signOut, loginWithRollNumber }}>
       {children}
     </AuthContext.Provider>
   );
