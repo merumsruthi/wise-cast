@@ -10,7 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, UserPlus, Trash2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Plus, UserPlus, Trash2, Play, Square, Clock } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
 type ElectionStatus = Database["public"]["Enums"]["election_status"];
@@ -99,6 +100,18 @@ const TeacherElections = () => {
     },
   });
 
+  const updateStatus = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: ElectionStatus }) => {
+      const { error } = await supabase.from("elections").update({ status }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: (_, { status }) => {
+      toast({ title: `Election status set to ${status}` });
+      queryClient.invalidateQueries({ queryKey: ["cr-elections"] });
+    },
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
@@ -122,14 +135,33 @@ const TeacherElections = () => {
       <div className="space-y-4">
         {elections?.map((e) => (
           <Card key={e.id} className="glass-card">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="font-heading text-lg">{e.title}</CardTitle>
-                <p className="text-sm text-muted-foreground mt-1">{e.class} • {e.status}</p>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="font-heading text-lg">{e.title}</CardTitle>
+                  <p className="text-sm text-muted-foreground mt-1">{e.class} • {e.status}</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => { setShowAddCandidate(e.id); setClassVal(e.class ?? ""); }}>
+                  <UserPlus className="h-4 w-4 mr-2" />Manage Candidates
+                </Button>
               </div>
-              <Button variant="outline" size="sm" onClick={() => { setShowAddCandidate(e.id); setClassVal(e.class ?? ""); }}>
-                <UserPlus className="h-4 w-4 mr-2" />Manage Candidates
-              </Button>
+              <div className="flex items-center gap-2 mt-3">
+                {e.status === "upcoming" && (
+                  <Button size="sm" onClick={() => updateStatus.mutate({ id: e.id, status: "active" })} disabled={updateStatus.isPending}>
+                    <Play className="h-3 w-3 mr-1" />Start Election
+                  </Button>
+                )}
+                {e.status === "active" && (
+                  <Button size="sm" variant="destructive" onClick={() => updateStatus.mutate({ id: e.id, status: "completed" })} disabled={updateStatus.isPending}>
+                    <Square className="h-3 w-3 mr-1" />End Election
+                  </Button>
+                )}
+                {e.status === "completed" && (
+                  <Button size="sm" variant="outline" onClick={() => updateStatus.mutate({ id: e.id, status: "upcoming" })} disabled={updateStatus.isPending}>
+                    <Clock className="h-3 w-3 mr-1" />Reset to Upcoming
+                  </Button>
+                )}
+              </div>
             </CardHeader>
           </Card>
         ))}
