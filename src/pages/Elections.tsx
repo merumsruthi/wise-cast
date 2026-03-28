@@ -79,13 +79,19 @@ const Elections = () => {
   });
 
   const { data: candidates, isLoading: candidatesLoading } = useQuery({
-    queryKey: ["candidates", selectedElection],
+    queryKey: ["candidates", selectedElection, studentClass],
     queryFn: async () => {
       if (!selectedElection) return [];
-      const { data } = await supabase
+      let query = supabase
         .from("candidates")
         .select("*")
         .eq("election_id", selectedElection);
+      // For CR elections, filter candidates by student's class
+      const election = elections?.find((e) => e.id === selectedElection);
+      if (activeRole === "student" && election?.election_type === "cr" && studentClass) {
+        query = query.eq("class", studentClass);
+      }
+      const { data } = await query;
       return (data ?? []) as Candidate[];
     },
     enabled: !!selectedElection,
