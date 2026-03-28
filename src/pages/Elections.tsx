@@ -85,14 +85,14 @@ const Elections = () => {
   const { data: myVotes, isLoading: votesLoading } = useQuery({
     queryKey: ["my-votes"],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("votes")
-        .select("election_id, candidate_id");
-      // Fetch role_title separately since types may not be updated yet
-      const { data: fullData } = await supabase
-        .from("votes")
-        .select("*") as { data: Array<{ election_id: string; candidate_id: string; role_title: string | null }> | null };
-      return fullData ?? [];
+        .select("election_id, candidate_id, role_title");
+      if (error) {
+        console.error("Error fetching votes:", error);
+        return [];
+      }
+      return (data ?? []) as Array<{ election_id: string; candidate_id: string; role_title: string }>;
     },
   });
 
