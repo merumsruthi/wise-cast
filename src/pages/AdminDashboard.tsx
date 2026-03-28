@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Vote, Users, BarChart3, UserPlus } from "lucide-react";
+import { Vote, Users, BarChart3, UserPlus, TrendingUp } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
 const AdminDashboard = () => {
@@ -47,6 +47,19 @@ const AdminDashboard = () => {
     },
   });
 
+  const { data: allVotes } = useQuery({
+    queryKey: ["all-votes"],
+    queryFn: async () => {
+      const { data } = await supabase.from("votes").select("*");
+      return data ?? [];
+    },
+  });
+
+  const totalVoters = allProfiles?.length ?? 0;
+  const totalVotesCast = allVotes?.length ?? 0;
+  const uniqueVoters = new Set(allVotes?.map((v) => v.user_id)).size;
+  const participation = totalVoters > 0 ? Math.round((uniqueVoters / totalVoters) * 100) : 0;
+
   const createUser = useMutation({
     mutationFn: async () => {
       const { data, error } = await supabase.functions.invoke("auth-login", {
@@ -59,7 +72,6 @@ const AdminDashboard = () => {
           user_class: userClass,
         },
       });
-
       if (error) throw new Error("Failed to create user");
       if (data?.error) throw new Error(data.error);
       return data;
@@ -121,7 +133,7 @@ const AdminDashboard = () => {
         </Dialog>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="glass-card">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Total Elections</CardTitle>
@@ -142,11 +154,22 @@ const AdminDashboard = () => {
         </Card>
         <Card className="glass-card">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Registered Users</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Total Votes Cast</CardTitle>
             <BarChart3 className="h-5 w-5 text-warning" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-heading font-bold">{allProfiles?.length ?? 0}</div>
+            <div className="text-3xl font-heading font-bold">{totalVotesCast}</div>
+            <p className="text-xs text-muted-foreground mt-1">{uniqueVoters} unique voters</p>
+          </CardContent>
+        </Card>
+        <Card className="glass-card">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Participation</CardTitle>
+            <TrendingUp className="h-5 w-5 text-accent" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-heading font-bold">{participation}%</div>
+            <p className="text-xs text-muted-foreground mt-1">{uniqueVoters} of {totalVoters} users</p>
           </CardContent>
         </Card>
       </div>
@@ -154,7 +177,7 @@ const AdminDashboard = () => {
       {/* Users list */}
       <Card className="glass-card">
         <CardHeader>
-          <CardTitle className="font-heading text-lg">Registered Users</CardTitle>
+          <CardTitle className="font-heading text-lg">Registered Users ({allProfiles?.length ?? 0})</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
