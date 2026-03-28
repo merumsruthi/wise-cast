@@ -100,6 +100,18 @@ const TeacherElections = () => {
     },
   });
 
+  const updateStatus = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: ElectionStatus }) => {
+      const { error } = await supabase.from("elections").update({ status }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: (_, { status }) => {
+      toast({ title: `Election status set to ${status}` });
+      queryClient.invalidateQueries({ queryKey: ["cr-elections"] });
+    },
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
