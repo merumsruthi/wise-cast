@@ -52,31 +52,46 @@ interface Election {
 }
 
 const Elections = () => {
-  const { user } = useAuth();
+  const { user, profile, activeRole } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [selectedElection, setSelectedElection] = useState<string | null>(null);
   const [confirmVote, setConfirmVote] = useState<{ candidateId: string; candidateName: string; role: string } | null>(null);
 
+  const studentClass = profile?.class;
+
   const { data: elections } = useQuery({
-    queryKey: ["elections"],
+    queryKey: ["elections", studentClass, activeRole],
     queryFn: async () => {
       const { data } = await supabase
         .from("elections")
         .select("*")
         .order("created_at", { ascending: false });
-      return (data ?? []) as Election[];
+      let all = (data ?? []) as Election[];
+      // Students only see CR elections for their own class
+      if (activeRole === "student" && studentClass) {
+        all = all.filter(
+          (e) => e.election_type === "council" || (e.election_type === "cr" && e.class === studentClass)
+        );
+      }
+      return all;
     },
   });
 
   const { data: candidates, isLoading: candidatesLoading } = useQuery({
-    queryKey: ["candidates", selectedElection],
+    queryKey: ["candidates", selectedElection, studentClass],
     queryFn: async () => {
       if (!selectedElection) return [];
-      const { data } = await supabase
+      let query = supabase
         .from("candidates")
         .select("*")
         .eq("election_id", selectedElection);
+      // For CR elections, filter candidates by student's class
+      const election = elections?.find((e) => e.id === selectedElection);
+      if (activeRole === "student" && election?.election_type === "cr" && studentClass) {
+        query = query.eq("class", studentClass);
+      }
+      const { data } = await query;
       return (data ?? []) as Candidate[];
     },
     enabled: !!selectedElection,
