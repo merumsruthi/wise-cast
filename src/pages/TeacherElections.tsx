@@ -135,14 +135,33 @@ const TeacherElections = () => {
       <div className="space-y-4">
         {elections?.map((e) => (
           <Card key={e.id} className="glass-card">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="font-heading text-lg">{e.title}</CardTitle>
-                <p className="text-sm text-muted-foreground mt-1">{e.class} • {e.status}</p>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="font-heading text-lg">{e.title}</CardTitle>
+                  <p className="text-sm text-muted-foreground mt-1">{e.class} • {e.status}</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => { setShowAddCandidate(e.id); setClassVal(e.class ?? ""); }}>
+                  <UserPlus className="h-4 w-4 mr-2" />Manage Candidates
+                </Button>
               </div>
-              <Button variant="outline" size="sm" onClick={() => { setShowAddCandidate(e.id); setClassVal(e.class ?? ""); }}>
-                <UserPlus className="h-4 w-4 mr-2" />Manage Candidates
-              </Button>
+              <div className="flex items-center gap-2 mt-3">
+                {e.status === "upcoming" && (
+                  <Button size="sm" onClick={() => updateStatus.mutate({ id: e.id, status: "active" })} disabled={updateStatus.isPending}>
+                    <Play className="h-3 w-3 mr-1" />Start Election
+                  </Button>
+                )}
+                {e.status === "active" && (
+                  <Button size="sm" variant="destructive" onClick={() => updateStatus.mutate({ id: e.id, status: "completed" })} disabled={updateStatus.isPending}>
+                    <Square className="h-3 w-3 mr-1" />End Election
+                  </Button>
+                )}
+                {e.status === "completed" && (
+                  <Button size="sm" variant="outline" onClick={() => updateStatus.mutate({ id: e.id, status: "upcoming" })} disabled={updateStatus.isPending}>
+                    <Clock className="h-3 w-3 mr-1" />Reset to Upcoming
+                  </Button>
+                )}
+              </div>
             </CardHeader>
           </Card>
         ))}
