@@ -157,13 +157,32 @@ const Elections = () => {
       electionId: string;
       roleTitle: string;
     }) => {
+      // Pre-check: has user already voted for this role?
+      const { data: existing, error: checkErr } = await supabase
+        .from("votes")
+        .select("id")
+        .eq("election_id", electionId)
+        .eq("role_title", roleTitle)
+        .maybeSingle();
+
+      if (checkErr) {
+        console.error("Vote check error:", checkErr);
+        throw new Error("Failed to verify voting status. Please try again.");
+      }
+      if (existing) {
+        throw new Error("You have already voted for this role.");
+      }
+
       const { error } = await supabase.from("votes").insert({
         user_id: user!.id,
         candidate_id: candidateId,
         election_id: electionId,
         role_title: roleTitle,
-      });
-      if (error) throw error;
+      } as any);
+      if (error) {
+        console.error("Vote insert error:", error);
+        throw error;
+      }
     },
     onSuccess: () => {
       toast({
@@ -174,11 +193,12 @@ const Elections = () => {
       setConfirmVote(null);
     },
     onError: (err: any) => {
+      console.error("Vote mutation error:", err);
       toast({
         title: "Voting Error",
-        description: err.message?.includes("duplicate")
+        description: err.message?.includes("duplicate") || err.message?.includes("already voted")
           ? "You have already voted for this role."
-          : err.message,
+          : err.message || "An unexpected error occurred.",
         variant: "destructive",
       });
       setConfirmVote(null);
