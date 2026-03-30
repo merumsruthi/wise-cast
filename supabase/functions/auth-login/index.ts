@@ -33,6 +33,41 @@ Deno.serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
+    // ─── VALIDATE CREDENTIALS ───
+    if (action === "validate_credentials") {
+      const { roll_number, phone, role } = body;
+
+      if (!roll_number || !phone || !role) {
+        return jsonResponse({ error: "Roll number, phone number, and role are required" }, 400);
+      }
+
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("id, user_id, full_name, roll_number, phone")
+        .eq("roll_number", roll_number)
+        .eq("phone", phone)
+        .maybeSingle();
+
+      if (!profile) {
+        return jsonResponse({ error: "Invalid credentials. No account found with this roll number and phone number." }, 401);
+      }
+
+      const { data: userRoles } = await supabaseAdmin
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", profile.user_id);
+
+      const rolesList = userRoles?.map((r: any) => r.role) ?? [];
+
+      if (!rolesList.includes(role)) {
+        return jsonResponse({
+          error: `You are not registered as a ${role.replace('_', ' ')}. Please select the correct role.`
+        }, 403);
+      }
+
+      return jsonResponse({ success: true, message: "Credentials validated" });
+    }
+
     // ─── SEND OTP ───
     if (action === "send_otp") {
       const { phone } = body;
