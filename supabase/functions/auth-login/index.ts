@@ -13,6 +13,10 @@ function jsonResponse(body: object, status = 200) {
   });
 }
 
+function generateOTP(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -29,6 +33,122 @@ Deno.serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
+    // ─── SEND OTP ───
+    if (action === "send_otp") {
+      const { phone } = body;
+
+      if (!phone || phone.length < 10) {
+        return jsonResponse({ error: "Please enter a valid phone number" }, 400);
+      }
+
+      // Check if phone exists in profiles
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, roll_number")
+        .eq("phone", phone)
+        .maybeSingle();
+
+      if (!profile) {
+        return jsonResponse({ error: "No account found with this phone number. Contact your administrator." }, 404);
+      }
+
+      // Invalidate any existing unused OTPs for this phone
+      await supabaseAdmin
+        .from("otp_codes")
+        .update({ used: true })
+        .eq("phone", phone)
+        .eq("used", false);
+
+      // Generate and store OTP
+      const code = generateOTP();
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 minutes
+
+      await supabaseAdmin
+        .from("otp_codes")
+        .insert({ phone, code, expires_at: expiresAt });
+
+      // In production, send SMS via Twilio/etc. For now, log it.
+      console.log(`OTP for ${phone}: ${code}`);
+
+      return jsonResponse({
+        success: true,
+        message: "OTP sent successfully",
+        // Include OTP in response for testing (remove in production)
+        otp_debug: code,
+      });
+    }
+
+    // ─── VERIFY OTP ───
+    if (action === "verify_otp") {
+      const { phone, otp } = body;
+
+      if (!phone || !otp) {
+        return jsonResponse({ error: "Phone and OTP are required" }, 400);
+      }
+
+      // Find valid OTP
+      const { data: otpRecord } = await supabaseAdmin
+        .from("otp_codes")
+        .select("*")
+        .eq("phone", phone)
+        .eq("code", otp)
+        .eq("used", false)
+        .gte("expires_at", new Date().toISOString())
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!otpRecord) {
+        return jsonResponse({ error: "Invalid or expired OTP. Please try again." }, 401);
+      }
+
+      // Mark OTP as used
+      await supabaseAdmin
+        .from("otp_codes")
+        .update({ used: true })
+        .eq("id", otpRecord.id);
+
+      // Fetch profile
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("*")
+        .eq("phone", phone)
+        .maybeSingle();
+
+      if (!profile) {
+        return jsonResponse({ error: "User profile not found" }, 404);
+      }
+
+      // Fetch roles
+      const { data: userRoles } = await supabaseAdmin
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", profile.user_id);
+
+      const rolesList = userRoles?.map((r: any) => r.role) ?? [];
+
+      // Sign in using synthetic credentials
+      const syntheticEmail = `${profile.roll_number!.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
+      const syntheticPassword = `cv_${phone}_${profile.roll_number}`;
+
+      const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
+        email: syntheticEmail,
+        password: syntheticPassword,
+      });
+
+      if (authError) {
+        console.error("Auth error:", authError.message);
+        return jsonResponse({ error: "Authentication failed. Contact your administrator." }, 401);
+      }
+
+      return jsonResponse({
+        session: authData.session,
+        user: authData.user,
+        profile,
+        roles: rolesList,
+      });
+    }
+
     // ─── LOGIN ───
     if (action === "login") {
       const { roll_number, phone, role } = body;
@@ -41,7 +161,6 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "Please select your role" }, 400);
       }
 
-      // Validate credentials against profiles table
       const { data: profile, error: profileError } = await supabaseAdmin
         .from("profiles")
         .select("*")
@@ -53,7 +172,6 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "Invalid roll number or phone number. Please check your credentials." }, 401);
       }
 
-      // Fetch user roles
       const { data: userRoles } = await supabaseAdmin
         .from("user_roles")
         .select("role")
@@ -61,22 +179,16 @@ Deno.serve(async (req) => {
 
       const rolesList = userRoles?.map((r: any) => r.role) ?? [];
 
-      // Validate that user has the selected role
       if (!rolesList.includes(role)) {
         return jsonResponse({ 
           error: `You are not registered as a ${role.replace('_', ' ')}. Please select the correct role.` 
         }, 403);
       }
 
-      // Sign in with synthetic credentials
       const syntheticEmail = `${roll_number.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
       const syntheticPassword = `cv_${phone}_${roll_number}`;
 
-      const supabaseClient = createClient(supabaseUrl, serviceRoleKey, {
-        auth: { autoRefreshToken: false, persistSession: false },
-      });
-
-      const { data: authData, error: authError } = await supabaseClient.auth.signInWithPassword({
+      const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
         email: syntheticEmail,
         password: syntheticPassword,
       });
@@ -119,7 +231,6 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "Name, roll number, phone, and role are required" }, 400);
       }
 
-      // Check for duplicate roll number
       const { data: existing } = await supabaseAdmin
         .from("profiles")
         .select("id")
@@ -130,7 +241,6 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "A user with this roll number already exists" }, 409);
       }
 
-      // Create auth user with synthetic credentials
       const syntheticEmail = `${roll_number.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
       const syntheticPassword = `cv_${phone}_${roll_number}`;
 
@@ -146,7 +256,6 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "Failed to create user: " + createError.message }, 500);
       }
 
-      // Update profile with roll_number, phone, class
       await supabaseAdmin
         .from("profiles")
         .update({
@@ -157,7 +266,6 @@ Deno.serve(async (req) => {
         })
         .eq("user_id", newUser.user.id);
 
-      // Set user role (delete default 'student' if different)
       if (role !== "student") {
         await supabaseAdmin
           .from("user_roles")
@@ -187,7 +295,6 @@ Deno.serve(async (req) => {
         const syntheticEmail = `${u.roll.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
         const syntheticPassword = `cv_${u.phone}_${u.roll}`;
 
-        // Check if already exists
         const { data: existing } = await supabaseAdmin
           .from("profiles")
           .select("id")
@@ -195,7 +302,6 @@ Deno.serve(async (req) => {
           .maybeSingle();
 
         if (existing) {
-          // Update existing profile
           await supabaseAdmin
             .from("profiles")
             .update({ full_name: u.name, phone: u.phone, class: u.userClass })

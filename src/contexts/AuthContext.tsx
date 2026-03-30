@@ -22,6 +22,7 @@ interface AuthContextType {
   loading: boolean;
   signOut: () => Promise<void>;
   loginWithRollNumber: (rollNumber: string, phone: string, role: string) => Promise<{ error?: string }>;
+  setSessionFromOtp: (session: { access_token: string; refresh_token: string }, role: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -33,6 +34,7 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   signOut: async () => {},
   loginWithRollNumber: async () => ({}),
+  setSessionFromOtp: async () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -134,8 +136,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionStorage.removeItem("campusvote_active_role");
   };
 
+  const setSessionFromOtp = async (sessionData: { access_token: string; refresh_token: string }, role: string) => {
+    setActiveRole(role as AppRole);
+    sessionStorage.setItem("campusvote_active_role", role);
+    await supabase.auth.setSession({
+      access_token: sessionData.access_token,
+      refresh_token: sessionData.refresh_token,
+    });
+  };
+
   return (
-    <AuthContext.Provider value={{ user, session, profile, roles, activeRole, loading, signOut, loginWithRollNumber }}>
+    <AuthContext.Provider value={{ user, session, profile, roles, activeRole, loading, signOut, loginWithRollNumber, setSessionFromOtp }}>
       {children}
     </AuthContext.Provider>
   );
