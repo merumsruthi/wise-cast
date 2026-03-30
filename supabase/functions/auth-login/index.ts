@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
 
     // ─── VERIFY OTP ───
     if (action === "verify_otp") {
-      const { phone, otp } = body;
+      const { phone, otp, role } = body;
 
       if (!phone || !otp) {
         return jsonResponse({ error: "Phone and OTP are required" }, 400);
