@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
-import { Vote, AlertCircle, Phone, ArrowLeft, Loader2, CheckCircle2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Vote, AlertCircle, Phone, ArrowLeft, Loader2, CheckCircle2, UserCircle, Hash } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -16,22 +17,38 @@ const roleDashboardMap: Record<string, string> = {
   class_teacher: "/dashboard/teacher",
 };
 
-type Step = "phone" | "otp";
+const roleLabels: Record<string, string> = {
+  student: "Student",
+  admin: "Admin",
+  class_teacher: "Class Teacher",
+};
+
+type Step = "credentials" | "otp";
 
 const Login = () => {
+  const [role, setRole] = useState("");
+  const [rollNumber, setRollNumber] = useState("");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
-  const [step, setStep] = useState<Step>("phone");
+  const [step, setStep] = useState<Step>("credentials");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [debugOtp, setDebugOtp] = useState("");
   const navigate = useNavigate();
   const { setSessionFromOtp } = useAuth();
 
-  const handleSendOtp = async (e: React.FormEvent) => {
+  const handleValidateAndSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
+    if (!role) {
+      setError("Please select your role.");
+      return;
+    }
+    if (!rollNumber.trim()) {
+      setError("Please enter your Roll Number / ID.");
+      return;
+    }
     if (!phone || phone.length < 10) {
       setError("Please enter a valid phone number.");
       return;
@@ -40,6 +57,18 @@ const Login = () => {
     setLoading(true);
 
     try {
+      // First validate credentials exist in DB
+      const { data: validateData, error: valError } = await supabase.functions.invoke("auth-login", {
+        body: { action: "validate_credentials", roll_number: rollNumber, phone, role },
+      });
+
+      if (valError || validateData?.error) {
+        setError(validateData?.error || "Invalid credentials. Please check and try again.");
+        setLoading(false);
+        return;
+      }
+
+      // Credentials valid, now send OTP
       const { data, error: fnError } = await supabase.functions.invoke("auth-login", {
         body: { action: "send_otp", phone },
       });
@@ -48,7 +77,6 @@ const Login = () => {
         setError(data?.error || "Failed to send OTP. Please try again.");
       } else {
         setStep("otp");
-        // Show debug OTP in development
         if (data?.otp_debug) {
           setDebugOtp(data.otp_debug);
           toast.info(`Test OTP: ${data.otp_debug}`, { duration: 30000 });
@@ -74,21 +102,14 @@ const Login = () => {
 
     try {
       const { data, error: fnError } = await supabase.functions.invoke("auth-login", {
-        body: { action: "verify_otp", phone, otp },
+        body: { action: "verify_otp", phone, otp, role },
       });
 
       if (fnError || data?.error) {
         setError(data?.error || "OTP verification failed.");
       } else if (data?.session) {
-        const roles: string[] = data.roles || [];
-        const primaryRole = roles.includes("admin")
-          ? "admin"
-          : roles.includes("class_teacher")
-          ? "class_teacher"
-          : "student";
-
-        await setSessionFromOtp(data.session, primaryRole);
-        navigate(roleDashboardMap[primaryRole] || "/dashboard");
+        await setSessionFromOtp(data.session, role);
+        navigate(roleDashboardMap[role] || "/dashboard");
       } else {
         setError("Unexpected error. Please try again.");
       }
@@ -110,23 +131,53 @@ const Login = () => {
         <Card className="glass-card">
           <CardHeader className="text-center">
             <CardTitle className="font-heading text-2xl">
-              {step === "phone" ? "Welcome Back" : "Verify OTP"}
+              {step === "credentials" ? "Welcome Back" : "Verify OTP"}
             </CardTitle>
             <CardDescription>
-              {step === "phone"
-                ? "Enter your registered phone number to receive an OTP"
-                : "Enter the 6-digit code sent to your phone"}
+              {step === "credentials"
+                ? "Select your role and enter your credentials to login"
+                : `Enter the 6-digit code sent to your phone ending ${phone.slice(-4)}`}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {step === "phone" ? (
-              <form onSubmit={handleSendOtp} className="space-y-5">
+            {step === "credentials" ? (
+              <form onSubmit={handleValidateAndSendOtp} className="space-y-5">
                 {error && (
                   <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
                     <AlertCircle className="h-4 w-4 shrink-0" />
                     <span>{error}</span>
                   </div>
                 )}
+
+                <div className="space-y-2">
+                  <Label htmlFor="role">Select Role</Label>
+                  <Select value={role} onValueChange={setRole}>
+                    <SelectTrigger id="role">
+                      <SelectValue placeholder="Choose your role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="student">🎓 Student</SelectItem>
+                      <SelectItem value="admin">🛡️ Admin</SelectItem>
+                      <SelectItem value="class_teacher">📚 Class Teacher</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="rollNumber">Roll Number / ID</Label>
+                  <div className="relative">
+                    <Hash className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="rollNumber"
+                      type="text"
+                      value={rollNumber}
+                      onChange={(e) => setRollNumber(e.target.value)}
+                      placeholder="e.g. CS2024001"
+                      className="pl-10"
+                      required
+                    />
+                  </div>
+                </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="phone">Phone Number</Label>
@@ -148,7 +199,7 @@ const Login = () => {
                   {loading ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Sending OTP...
+                      Validating...
                     </>
                   ) : (
                     "Send OTP"
@@ -203,14 +254,14 @@ const Login = () => {
                   variant="ghost"
                   className="w-full"
                   onClick={() => {
-                    setStep("phone");
+                    setStep("credentials");
                     setOtp("");
                     setError("");
                     setDebugOtp("");
                   }}
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  Change Phone Number
+                  Back to Credentials
                 </Button>
               </form>
             )}
