@@ -181,6 +181,7 @@ Deno.serve(async (req) => {
         user: authData.user,
         profile,
         roles: rolesList,
+        selectedRole: role || rolesList[0],
       });
     }
 
