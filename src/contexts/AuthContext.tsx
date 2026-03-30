@@ -22,6 +22,7 @@ interface AuthContextType {
   loading: boolean;
   signOut: () => Promise<void>;
   loginWithRollNumber: (rollNumber: string, phone: string, role: string) => Promise<{ error?: string }>;
+  setSessionFromOtp: (session: { access_token: string; refresh_token: string }, role: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
