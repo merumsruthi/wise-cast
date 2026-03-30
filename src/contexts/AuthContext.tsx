@@ -34,6 +34,7 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   signOut: async () => {},
   loginWithRollNumber: async () => ({}),
+  setSessionFromOtp: async () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
