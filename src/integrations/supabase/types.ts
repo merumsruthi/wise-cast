@@ -101,6 +101,7 @@ export type Database = {
         Row: {
           code: string
           created_at: string
+          email: string | null
           expires_at: string
           id: string
           phone: string
@@ -109,6 +110,7 @@ export type Database = {
         Insert: {
           code: string
           created_at?: string
+          email?: string | null
           expires_at: string
           id?: string
           phone: string
@@ -117,6 +119,7 @@ export type Database = {
         Update: {
           code?: string
           created_at?: string
+          email?: string | null
           expires_at?: string
           id?: string
           phone?: string
@@ -128,6 +131,7 @@ export type Database = {
         Row: {
           class: string | null
           created_at: string
+          email: string | null
           full_name: string
           id: string
           is_verified: boolean
@@ -139,6 +143,7 @@ export type Database = {
         Insert: {
           class?: string | null
           created_at?: string
+          email?: string | null
           full_name: string
           id?: string
           is_verified?: boolean
@@ -150,6 +155,7 @@ export type Database = {
         Update: {
           class?: string | null
           created_at?: string
+          email?: string | null
           full_name?: string
           id?: string
           is_verified?: boolean
