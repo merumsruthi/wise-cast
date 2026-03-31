@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Vote, AlertCircle, Phone, ArrowLeft, Loader2, CheckCircle2, UserCircle, Hash } from "lucide-react";
+import { Vote, AlertCircle, Phone, ArrowLeft, Loader2, CheckCircle2, Hash, Lock, Eye, EyeOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -17,18 +17,18 @@ const roleDashboardMap: Record<string, string> = {
   class_teacher: "/dashboard/teacher",
 };
 
-const roleLabels: Record<string, string> = {
-  student: "Student",
-  admin: "Admin",
-  class_teacher: "Class Teacher",
-};
-
-type Step = "credentials" | "otp";
+type LoginMode = "password" | "otp";
+type Step = "credentials" | "otp" | "set_password";
 
 const Login = () => {
+  const [mode, setMode] = useState<LoginMode>("password");
   const [role, setRole] = useState("");
   const [rollNumber, setRollNumber] = useState("");
   const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [otp, setOtp] = useState("");
   const [step, setStep] = useState<Step>("credentials");
   const [error, setError] = useState("");
@@ -37,44 +37,60 @@ const Login = () => {
   const navigate = useNavigate();
   const { setSessionFromOtp } = useAuth();
 
-  const handleValidateAndSendOtp = async (e: React.FormEvent) => {
+  const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
-    if (!role) {
-      setError("Please select your role.");
-      return;
-    }
-    if (!rollNumber.trim()) {
-      setError("Please enter your Roll Number / ID.");
-      return;
-    }
-    if (!phone || phone.length < 10) {
-      setError("Please enter a valid phone number.");
-      return;
-    }
+    if (!role) { setError("Please select your role."); return; }
+    if (!rollNumber.trim()) { setError("Please enter your Roll Number / ID."); return; }
+    if (!password) { setError("Please enter your password."); return; }
 
     setLoading(true);
-
     try {
-      // First validate credentials exist in DB
+      const { data, error: fnError } = await supabase.functions.invoke("auth-login", {
+        body: { action: "password_login", roll_number: rollNumber, password, role },
+      });
+
+      if (fnError || data?.error) {
+        setError(data?.error || "Login failed. Please try again.");
+      } else if (data?.session) {
+        await setSessionFromOtp(data.session, role);
+        navigate(roleDashboardMap[role] || "/dashboard");
+      } else {
+        setError("Unexpected error occurred.");
+      }
+    } catch {
+      setError("Something went wrong. Please try again.");
+    }
+    setLoading(false);
+  };
+
+  const handleOtpStart = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+
+    if (!role) { setError("Please select your role."); return; }
+    if (!rollNumber.trim()) { setError("Please enter your Roll Number / ID."); return; }
+    if (!phone || phone.length < 10) { setError("Please enter a valid phone number."); return; }
+
+    setLoading(true);
+    try {
       const { data: validateData, error: valError } = await supabase.functions.invoke("auth-login", {
         body: { action: "validate_credentials", roll_number: rollNumber, phone, role },
       });
 
       if (valError || validateData?.error) {
-        setError(validateData?.error || "Invalid credentials. Please check and try again.");
+        setError(validateData?.error || "Invalid credentials.");
         setLoading(false);
         return;
       }
 
-      // Credentials valid, now send OTP
       const { data, error: fnError } = await supabase.functions.invoke("auth-login", {
         body: { action: "send_otp", phone },
       });
 
       if (fnError || data?.error) {
-        setError(data?.error || "Failed to send OTP. Please try again.");
+        setError(data?.error || "Failed to send OTP.");
       } else {
         setStep("otp");
         if (data?.otp_debug) {
@@ -85,7 +101,6 @@ const Login = () => {
     } catch {
       setError("Something went wrong. Please try again.");
     }
-
     setLoading(false);
   };
 
@@ -93,13 +108,9 @@ const Login = () => {
     e.preventDefault();
     setError("");
 
-    if (otp.length !== 6) {
-      setError("Please enter the 6-digit OTP.");
-      return;
-    }
+    if (otp.length !== 6) { setError("Please enter the 6-digit OTP."); return; }
 
     setLoading(true);
-
     try {
       const { data, error: fnError } = await supabase.functions.invoke("auth-login", {
         body: { action: "verify_otp", phone, otp, role },
@@ -107,7 +118,12 @@ const Login = () => {
 
       if (fnError || data?.error) {
         setError(data?.error || "OTP verification failed.");
+      } else if (data?.needs_password) {
+        // First-time user — needs to set password
+        setStep("set_password");
+        toast.success("OTP verified! Please create your password.");
       } else if (data?.session) {
+        // Already verified user
         await setSessionFromOtp(data.session, role);
         navigate(roleDashboardMap[role] || "/dashboard");
       } else {
@@ -116,9 +132,87 @@ const Login = () => {
     } catch {
       setError("Something went wrong. Please try again.");
     }
-
     setLoading(false);
   };
+
+  const handleSetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+
+    if (newPassword.length < 6) { setError("Password must be at least 6 characters."); return; }
+    if (newPassword !== confirmPassword) { setError("Passwords do not match."); return; }
+
+    setLoading(true);
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke("auth-login", {
+        body: { action: "set_password", phone, roll_number: rollNumber, password: newPassword, role },
+      });
+
+      if (fnError || data?.error) {
+        setError(data?.error || "Failed to set password.");
+      } else if (data?.session) {
+        toast.success("Password set successfully! Welcome to CampusVote.");
+        await setSessionFromOtp(data.session, role);
+        navigate(roleDashboardMap[role] || "/dashboard");
+      } else {
+        setError("Unexpected error. Please try again.");
+      }
+    } catch {
+      setError("Something went wrong. Please try again.");
+    }
+    setLoading(false);
+  };
+
+  const resetToStart = () => {
+    setStep("credentials");
+    setOtp("");
+    setError("");
+    setDebugOtp("");
+    setNewPassword("");
+    setConfirmPassword("");
+  };
+
+  const renderError = () =>
+    error ? (
+      <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+        <AlertCircle className="h-4 w-4 shrink-0" />
+        <span>{error}</span>
+      </div>
+    ) : null;
+
+  const renderRoleSelect = () => (
+    <div className="space-y-2">
+      <Label htmlFor="role">Select Role</Label>
+      <Select value={role} onValueChange={setRole}>
+        <SelectTrigger id="role">
+          <SelectValue placeholder="Choose your role" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="student">🎓 Student</SelectItem>
+          <SelectItem value="admin">🛡️ Admin</SelectItem>
+          <SelectItem value="class_teacher">📚 Class Teacher</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  );
+
+  const renderRollNumberInput = () => (
+    <div className="space-y-2">
+      <Label htmlFor="rollNumber">Roll Number / ID</Label>
+      <div className="relative">
+        <Hash className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          id="rollNumber"
+          type="text"
+          value={rollNumber}
+          onChange={(e) => setRollNumber(e.target.value)}
+          placeholder="e.g. CS2024001"
+          className="pl-10"
+          required
+        />
+      </div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
@@ -131,53 +225,71 @@ const Login = () => {
         <Card className="glass-card">
           <CardHeader className="text-center">
             <CardTitle className="font-heading text-2xl">
-              {step === "credentials" ? "Welcome Back" : "Verify OTP"}
+              {step === "credentials" && mode === "password" && "Login"}
+              {step === "credentials" && mode === "otp" && "Verify with OTP"}
+              {step === "otp" && "Enter OTP"}
+              {step === "set_password" && "Create Password"}
             </CardTitle>
             <CardDescription>
-              {step === "credentials"
-                ? "Select your role and enter your credentials to login"
-                : `Enter the 6-digit code sent to your phone ending ${phone.slice(-4)}`}
+              {step === "credentials" && mode === "password" && "Enter your credentials to login"}
+              {step === "credentials" && mode === "otp" && "Verify your identity with OTP to set up your account"}
+              {step === "otp" && `Enter the 6-digit code sent to your phone ending ${phone.slice(-4)}`}
+              {step === "set_password" && "Create a secure password for future logins"}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {step === "credentials" ? (
-              <form onSubmit={handleValidateAndSendOtp} className="space-y-5">
-                {error && (
-                  <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <span>{error}</span>
-                  </div>
-                )}
+            {/* ─── PASSWORD LOGIN ─── */}
+            {step === "credentials" && mode === "password" && (
+              <form onSubmit={handlePasswordLogin} className="space-y-5">
+                {renderError()}
+                {renderRoleSelect()}
+                {renderRollNumberInput()}
 
                 <div className="space-y-2">
-                  <Label htmlFor="role">Select Role</Label>
-                  <Select value={role} onValueChange={setRole}>
-                    <SelectTrigger id="role">
-                      <SelectValue placeholder="Choose your role" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="student">🎓 Student</SelectItem>
-                      <SelectItem value="admin">🛡️ Admin</SelectItem>
-                      <SelectItem value="class_teacher">📚 Class Teacher</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="rollNumber">Roll Number / ID</Label>
+                  <Label htmlFor="password">Password</Label>
                   <div className="relative">
-                    <Hash className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                      id="rollNumber"
-                      type="text"
-                      value={rollNumber}
-                      onChange={(e) => setRollNumber(e.target.value)}
-                      placeholder="e.g. CS2024001"
-                      className="pl-10"
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter your password"
+                      className="pl-10 pr-10"
                       required
                     />
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
                   </div>
                 </div>
+
+                <Button type="submit" className="w-full" disabled={loading}>
+                  {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Logging in...</> : "Login"}
+                </Button>
+
+                <div className="text-center">
+                  <button
+                    type="button"
+                    className="text-sm text-primary hover:underline"
+                    onClick={() => { setMode("otp"); setError(""); }}
+                  >
+                    First time? Verify with OTP
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* ─── OTP CREDENTIALS ─── */}
+            {step === "credentials" && mode === "otp" && (
+              <form onSubmit={handleOtpStart} className="space-y-5">
+                {renderError()}
+                {renderRoleSelect()}
+                {renderRollNumberInput()}
 
                 <div className="space-y-2">
                   <Label htmlFor="phone">Phone Number</Label>
@@ -196,24 +308,25 @@ const Login = () => {
                 </div>
 
                 <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Validating...
-                    </>
-                  ) : (
-                    "Send OTP"
-                  )}
+                  {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Validating...</> : "Send OTP"}
                 </Button>
+
+                <div className="text-center">
+                  <button
+                    type="button"
+                    className="text-sm text-primary hover:underline"
+                    onClick={() => { setMode("password"); setError(""); }}
+                  >
+                    Already have a password? Login
+                  </button>
+                </div>
               </form>
-            ) : (
+            )}
+
+            {/* ─── OTP VERIFICATION ─── */}
+            {step === "otp" && (
               <form onSubmit={handleVerifyOtp} className="space-y-5">
-                {error && (
-                  <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <span>{error}</span>
-                  </div>
-                )}
+                {renderError()}
 
                 {debugOtp && (
                   <div className="flex items-center gap-2 p-3 rounded-lg bg-accent text-accent-foreground text-sm">
@@ -239,29 +352,66 @@ const Login = () => {
                 </div>
 
                 <Button type="submit" className="w-full" disabled={loading || otp.length !== 6}>
-                  {loading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Verifying...
-                    </>
-                  ) : (
-                    "Verify & Login"
-                  )}
+                  {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Verifying...</> : "Verify OTP"}
                 </Button>
 
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="w-full"
-                  onClick={() => {
-                    setStep("credentials");
-                    setOtp("");
-                    setError("");
-                    setDebugOtp("");
-                  }}
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                  Back to Credentials
+                <Button type="button" variant="ghost" className="w-full" onClick={resetToStart}>
+                  <ArrowLeft className="h-4 w-4" /> Back
+                </Button>
+              </form>
+            )}
+
+            {/* ─── SET PASSWORD ─── */}
+            {step === "set_password" && (
+              <form onSubmit={handleSetPassword} className="space-y-5">
+                {renderError()}
+
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-accent text-accent-foreground text-sm">
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  <span>OTP verified! Create a password for future logins.</span>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="newPassword">New Password</Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="newPassword"
+                      type={showPassword ? "text" : "password"}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="At least 6 characters"
+                      className="pl-10 pr-10"
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword">Confirm Password</Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="confirmPassword"
+                      type={showPassword ? "text" : "password"}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Re-enter password"
+                      className="pl-10"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <Button type="submit" className="w-full" disabled={loading}>
+                  {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Setting password...</> : "Set Password & Login"}
                 </Button>
               </form>
             )}
