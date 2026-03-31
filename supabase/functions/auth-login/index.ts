@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,6 +18,57 @@ function generateOTP(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+const ALLOWED_EMAIL_DOMAIN = "gnits.ac.in"; // Configurable domain
+
+async function sendOTPEmail(email: string, otp: string): Promise<boolean> {
+  const gmailUser = Deno.env.get("GMAIL_USER");
+  const gmailPass = Deno.env.get("GMAIL_APP_PASSWORD");
+
+  if (!gmailUser || !gmailPass) {
+    console.error("Gmail SMTP credentials not configured");
+    return false;
+  }
+
+  try {
+    const client = new SMTPClient({
+      connection: {
+        hostname: "smtp.gmail.com",
+        port: 465,
+        tls: true,
+        auth: {
+          username: gmailUser,
+          password: gmailPass,
+        },
+      },
+    });
+
+    await client.send({
+      from: gmailUser,
+      to: email,
+      subject: "CampusVote - Your OTP Verification Code",
+      content: `auto`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
+          <h2 style="color: #1a1a2e; text-align: center;">CampusVote</h2>
+          <p style="color: #333;">Your one-time verification code is:</p>
+          <div style="text-align: center; margin: 24px 0;">
+            <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; background: #f0f0f0; padding: 12px 24px; border-radius: 8px; color: #1a1a2e;">${otp}</span>
+          </div>
+          <p style="color: #666; font-size: 14px;">This code expires in <strong>5 minutes</strong>. Do not share it with anyone.</p>
+          <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />
+          <p style="color: #999; font-size: 12px; text-align: center;">If you didn't request this code, please ignore this email.</p>
+        </div>
+      `,
+    });
+
+    await client.close();
+    return true;
+  } catch (err) {
+    console.error("Failed to send OTP email:", err);
+    return false;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -33,23 +85,28 @@ Deno.serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // ─── VALIDATE CREDENTIALS (check if user exists, return is_verified status) ───
+    // ─── VALIDATE CREDENTIALS (check if user exists with email + roll_number + role) ───
     if (action === "validate_credentials") {
-      const { roll_number, phone, role } = body;
+      const { roll_number, email, role } = body;
 
-      if (!roll_number || !phone || !role) {
-        return jsonResponse({ error: "Roll number, phone number, and role are required" }, 400);
+      if (!roll_number || !email || !role) {
+        return jsonResponse({ error: "Roll number, email, and role are required" }, 400);
+      }
+
+      // Validate email domain
+      if (!email.toLowerCase().endsWith(`@${ALLOWED_EMAIL_DOMAIN}`)) {
+        return jsonResponse({ error: `Invalid email domain. Only @${ALLOWED_EMAIL_DOMAIN} emails are allowed.` }, 400);
       }
 
       const { data: profile } = await supabaseAdmin
         .from("profiles")
-        .select("id, user_id, full_name, roll_number, phone, is_verified")
+        .select("id, user_id, full_name, roll_number, email, is_verified")
         .eq("roll_number", roll_number)
-        .eq("phone", phone)
+        .eq("email", email)
         .maybeSingle();
 
       if (!profile) {
-        return jsonResponse({ error: "Invalid credentials. No account found with this roll number and phone number." }, 401);
+        return jsonResponse({ error: "Invalid credentials. No account found with this roll number and email." }, 401);
       }
 
       const { data: userRoles } = await supabaseAdmin
@@ -72,28 +129,33 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ─── SEND OTP ───
+    // ─── SEND OTP (via email) ───
     if (action === "send_otp") {
-      const { phone } = body;
+      const { email } = body;
 
-      if (!phone || phone.length < 10) {
-        return jsonResponse({ error: "Please enter a valid phone number" }, 400);
+      if (!email) {
+        return jsonResponse({ error: "Please enter a valid email address" }, 400);
+      }
+
+      if (!email.toLowerCase().endsWith(`@${ALLOWED_EMAIL_DOMAIN}`)) {
+        return jsonResponse({ error: `Invalid email domain. Only @${ALLOWED_EMAIL_DOMAIN} emails are allowed.` }, 400);
       }
 
       const { data: profile } = await supabaseAdmin
         .from("profiles")
         .select("id, full_name, roll_number")
-        .eq("phone", phone)
+        .eq("email", email)
         .maybeSingle();
 
       if (!profile) {
-        return jsonResponse({ error: "No account found with this phone number. Contact your administrator." }, 404);
+        return jsonResponse({ error: "No account found with this email. Contact your administrator." }, 404);
       }
 
+      // Invalidate previous OTPs for this email
       await supabaseAdmin
         .from("otp_codes")
         .update({ used: true })
-        .eq("phone", phone)
+        .eq("email", email)
         .eq("used", false);
 
       const code = generateOTP();
@@ -101,29 +163,32 @@ Deno.serve(async (req) => {
 
       await supabaseAdmin
         .from("otp_codes")
-        .insert({ phone, code, expires_at: expiresAt });
+        .insert({ email, phone: email, code, expires_at: expiresAt });
 
-      console.log(`OTP for ${phone}: ${code}`);
+      console.log(`OTP for ${email}: ${code}`);
+
+      // Send OTP via email
+      const emailSent = await sendOTPEmail(email, code);
 
       return jsonResponse({
         success: true,
-        message: "OTP sent successfully",
-        otp_debug: code,
+        message: emailSent ? "OTP sent to your email successfully" : "OTP generated (email delivery pending)",
+        otp_debug: emailSent ? undefined : code, // Only show debug OTP if email fails
       });
     }
 
-    // ─── VERIFY OTP (returns temporary token, does NOT create session yet) ───
+    // ─── VERIFY OTP ───
     if (action === "verify_otp") {
-      const { phone, otp, role } = body;
+      const { email, otp, role } = body;
 
-      if (!phone || !otp) {
-        return jsonResponse({ error: "Phone and OTP are required" }, 400);
+      if (!email || !otp) {
+        return jsonResponse({ error: "Email and OTP are required" }, 400);
       }
 
       const { data: otpRecord } = await supabaseAdmin
         .from("otp_codes")
         .select("*")
-        .eq("phone", phone)
+        .eq("email", email)
         .eq("code", otp)
         .eq("used", false)
         .gte("expires_at", new Date().toISOString())
@@ -135,6 +200,7 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "Invalid or expired OTP. Please try again." }, 401);
       }
 
+      // Mark OTP as used (prevent reuse)
       await supabaseAdmin
         .from("otp_codes")
         .update({ used: true })
@@ -143,7 +209,7 @@ Deno.serve(async (req) => {
       const { data: profile } = await supabaseAdmin
         .from("profiles")
         .select("*")
-        .eq("phone", phone)
+        .eq("email", email)
         .maybeSingle();
 
       if (!profile) {
@@ -153,7 +219,7 @@ Deno.serve(async (req) => {
       // Check if user is already verified — if so, just sign them in
       if (profile.is_verified) {
         const syntheticEmail = `${profile.roll_number!.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
-        const syntheticPassword = `cv_${phone}_${profile.roll_number}`;
+        const syntheticPassword = `cv_${email}_${profile.roll_number}`;
 
         const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
           email: syntheticEmail,
@@ -183,7 +249,7 @@ Deno.serve(async (req) => {
         success: true,
         needs_password: true,
         otp_verified: true,
-        phone,
+        email,
         roll_number: profile.roll_number,
         user_id: profile.user_id,
       });
@@ -191,10 +257,10 @@ Deno.serve(async (req) => {
 
     // ─── SET PASSWORD (first-time setup after OTP) ───
     if (action === "set_password") {
-      const { phone, roll_number, password } = body;
+      const { email, roll_number, password } = body;
 
-      if (!phone || !roll_number || !password) {
-        return jsonResponse({ error: "Phone, roll number, and password are required" }, 400);
+      if (!email || !roll_number || !password) {
+        return jsonResponse({ error: "Email, roll number, and password are required" }, 400);
       }
 
       if (password.length < 6) {
@@ -205,7 +271,7 @@ Deno.serve(async (req) => {
         .from("profiles")
         .select("*")
         .eq("roll_number", roll_number)
-        .eq("phone", phone)
+        .eq("email", email)
         .maybeSingle();
 
       if (!profile) {
@@ -216,7 +282,6 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "Account already verified. Please login with your password." }, 400);
       }
 
-      // Update the synthetic password to the user-chosen password
       const syntheticEmail = `${roll_number.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
 
       const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(profile.user_id, {
@@ -311,62 +376,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ─── LOGIN (legacy) ───
-    if (action === "login") {
-      const { roll_number, phone, role } = body;
-
-      if (!roll_number || !phone) {
-        return jsonResponse({ error: "Roll number and phone number are required" }, 400);
-      }
-
-      if (!role) {
-        return jsonResponse({ error: "Please select your role" }, 400);
-      }
-
-      const { data: profile } = await supabaseAdmin
-        .from("profiles")
-        .select("*")
-        .eq("roll_number", roll_number)
-        .eq("phone", phone)
-        .maybeSingle();
-
-      if (!profile) {
-        return jsonResponse({ error: "Invalid roll number or phone number." }, 401);
-      }
-
-      const { data: userRoles } = await supabaseAdmin
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", profile.user_id);
-
-      const rolesList = userRoles?.map((r: any) => r.role) ?? [];
-
-      if (!rolesList.includes(role)) {
-        return jsonResponse({
-          error: `You are not registered as a ${role.replace('_', ' ')}. Please select the correct role.`
-        }, 403);
-      }
-
-      const syntheticEmail = `${roll_number.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
-      const syntheticPassword = `cv_${phone}_${roll_number}`;
-
-      const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
-        email: syntheticEmail,
-        password: syntheticPassword,
-      });
-
-      if (authError) {
-        return jsonResponse({ error: "Authentication failed. Contact your administrator." }, 401);
-      }
-
-      return jsonResponse({
-        session: authData.session,
-        profile,
-        roles: rolesList,
-        selectedRole: role,
-      });
-    }
-
     // ─── CREATE USER (admin only) ───
     if (action === "create_user") {
       const authHeader = req.headers.get("Authorization");
@@ -385,10 +394,10 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "Admin access required" }, 403);
       }
 
-      const { name, roll_number, phone, role, user_class } = body;
+      const { name, roll_number, email, role, user_class } = body;
 
-      if (!name || !roll_number || !phone || !role) {
-        return jsonResponse({ error: "Name, roll number, phone, and role are required" }, 400);
+      if (!name || !roll_number || !email || !role) {
+        return jsonResponse({ error: "Name, roll number, email, and role are required" }, 400);
       }
 
       const { data: existing } = await supabaseAdmin
@@ -402,7 +411,7 @@ Deno.serve(async (req) => {
       }
 
       const syntheticEmail = `${roll_number.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
-      const syntheticPassword = `cv_${phone}_${roll_number}`;
+      const syntheticPassword = `cv_${email}_${roll_number}`;
 
       const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
         email: syntheticEmail,
@@ -419,7 +428,8 @@ Deno.serve(async (req) => {
         .from("profiles")
         .update({
           roll_number,
-          phone,
+          email,
+          phone: null,
           class: user_class || null,
           full_name: name,
         })
@@ -442,17 +452,17 @@ Deno.serve(async (req) => {
     // ─── SEED USERS ───
     if (action === "seed_users") {
       const users = [
-        { name: "Rahul Sharma", roll: "CS2024001", phone: "9876543001", role: "student", userClass: "CS-A" },
-        { name: "Priya Patel", roll: "CS2024002", phone: "9876543002", role: "student", userClass: "CS-B" },
-        { name: "Dr. Amit Kumar", roll: "ADMIN001", phone: "1234567890", role: "admin", userClass: null },
-        { name: "Prof. Sunita Verma", roll: "TCH001", phone: "9876543100", role: "class_teacher", userClass: "CS-A" },
+        { name: "Rahul Sharma", roll: "CS2024001", email: "rahul.sharma@gnits.ac.in", role: "student", userClass: "CS-A" },
+        { name: "Priya Patel", roll: "CS2024002", email: "priya.patel@gnits.ac.in", role: "student", userClass: "CS-B" },
+        { name: "Dr. Amit Kumar", roll: "ADMIN001", email: "admin@gnits.ac.in", role: "admin", userClass: null },
+        { name: "Prof. Sunita Verma", roll: "TCH001", email: "sunita.verma@gnits.ac.in", role: "class_teacher", userClass: "CS-A" },
       ];
 
       const results = [];
 
       for (const u of users) {
         const syntheticEmail = `${u.roll.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
-        const syntheticPassword = `cv_${u.phone}_${u.roll}`;
+        const syntheticPassword = `cv_${u.email}_${u.roll}`;
 
         const { data: existing } = await supabaseAdmin
           .from("profiles")
@@ -463,7 +473,7 @@ Deno.serve(async (req) => {
         if (existing) {
           await supabaseAdmin
             .from("profiles")
-            .update({ full_name: u.name, phone: u.phone, class: u.userClass })
+            .update({ full_name: u.name, email: u.email, class: u.userClass })
             .eq("roll_number", u.roll);
           results.push({ roll: u.roll, status: "already_exists_updated" });
           continue;
@@ -483,7 +493,7 @@ Deno.serve(async (req) => {
 
         await supabaseAdmin
           .from("profiles")
-          .update({ roll_number: u.roll, phone: u.phone, class: u.userClass, full_name: u.name })
+          .update({ roll_number: u.roll, email: u.email, class: u.userClass, full_name: u.name })
           .eq("user_id", newUser.user.id);
 
         if (u.role !== "student") {
@@ -503,9 +513,9 @@ Deno.serve(async (req) => {
       return jsonResponse({ success: true, results });
     }
 
-    return jsonResponse({ error: "Invalid action" }, 400);
-  } catch (error) {
-    console.error("Edge function error:", error);
-    return jsonResponse({ error: "Internal server error" }, 500);
+    return jsonResponse({ error: "Unknown action: " + action }, 400);
+  } catch (err: any) {
+    console.error("Edge function error:", err);
+    return jsonResponse({ error: err.message || "Internal server error" }, 500);
   }
 });

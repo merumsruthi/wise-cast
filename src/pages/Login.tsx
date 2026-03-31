@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Vote, AlertCircle, Phone, ArrowLeft, Loader2, CheckCircle2, Hash, Lock, Eye, EyeOff } from "lucide-react";
+import { Vote, AlertCircle, Mail, ArrowLeft, Loader2, CheckCircle2, Hash, Lock, Eye, EyeOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -17,6 +17,8 @@ const roleDashboardMap: Record<string, string> = {
   class_teacher: "/dashboard/teacher",
 };
 
+const ALLOWED_EMAIL_DOMAIN = "gnits.ac.in";
+
 type LoginMode = "password" | "otp";
 type Step = "credentials" | "otp" | "set_password";
 
@@ -24,7 +26,7 @@ const Login = () => {
   const [mode, setMode] = useState<LoginMode>("password");
   const [role, setRole] = useState("");
   const [rollNumber, setRollNumber] = useState("");
-  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -36,6 +38,10 @@ const Login = () => {
   const [debugOtp, setDebugOtp] = useState("");
   const navigate = useNavigate();
   const { setSessionFromOtp } = useAuth();
+
+  const validateEmailDomain = (email: string): boolean => {
+    return email.toLowerCase().endsWith(`@${ALLOWED_EMAIL_DOMAIN}`);
+  };
 
   const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,12 +77,16 @@ const Login = () => {
 
     if (!role) { setError("Please select your role."); return; }
     if (!rollNumber.trim()) { setError("Please enter your Roll Number / ID."); return; }
-    if (!phone || phone.length < 10) { setError("Please enter a valid phone number."); return; }
+    if (!email.trim()) { setError("Please enter your college email."); return; }
+    if (!validateEmailDomain(email)) {
+      setError(`Invalid email domain. Only @${ALLOWED_EMAIL_DOMAIN} emails are allowed.`);
+      return;
+    }
 
     setLoading(true);
     try {
       const { data: validateData, error: valError } = await supabase.functions.invoke("auth-login", {
-        body: { action: "validate_credentials", roll_number: rollNumber, phone, role },
+        body: { action: "validate_credentials", roll_number: rollNumber, email, role },
       });
 
       if (valError || validateData?.error) {
@@ -86,13 +96,14 @@ const Login = () => {
       }
 
       const { data, error: fnError } = await supabase.functions.invoke("auth-login", {
-        body: { action: "send_otp", phone },
+        body: { action: "send_otp", email },
       });
 
       if (fnError || data?.error) {
         setError(data?.error || "Failed to send OTP.");
       } else {
         setStep("otp");
+        toast.success("OTP sent to your email!");
         if (data?.otp_debug) {
           setDebugOtp(data.otp_debug);
           toast.info(`Test OTP: ${data.otp_debug}`, { duration: 30000 });
@@ -113,17 +124,15 @@ const Login = () => {
     setLoading(true);
     try {
       const { data, error: fnError } = await supabase.functions.invoke("auth-login", {
-        body: { action: "verify_otp", phone, otp, role },
+        body: { action: "verify_otp", email, otp, role },
       });
 
       if (fnError || data?.error) {
         setError(data?.error || "OTP verification failed.");
       } else if (data?.needs_password) {
-        // First-time user — needs to set password
         setStep("set_password");
         toast.success("OTP verified! Please create your password.");
       } else if (data?.session) {
-        // Already verified user
         await setSessionFromOtp(data.session, role);
         navigate(roleDashboardMap[role] || "/dashboard");
       } else {
@@ -145,7 +154,7 @@ const Login = () => {
     setLoading(true);
     try {
       const { data, error: fnError } = await supabase.functions.invoke("auth-login", {
-        body: { action: "set_password", phone, roll_number: rollNumber, password: newPassword, role },
+        body: { action: "set_password", email, roll_number: rollNumber, password: newPassword, role },
       });
 
       if (fnError || data?.error) {
@@ -232,8 +241,8 @@ const Login = () => {
             </CardTitle>
             <CardDescription>
               {step === "credentials" && mode === "password" && "Enter your credentials to login"}
-              {step === "credentials" && mode === "otp" && "Verify your identity with OTP to set up your account"}
-              {step === "otp" && `Enter the 6-digit code sent to your phone ending ${phone.slice(-4)}`}
+              {step === "credentials" && mode === "otp" && "Verify your identity with email OTP"}
+              {step === "otp" && `Enter the 6-digit code sent to ${email}`}
               {step === "set_password" && "Create a secure password for future logins"}
             </CardDescription>
           </CardHeader>
@@ -292,19 +301,20 @@ const Login = () => {
                 {renderRollNumberInput()}
 
                 <div className="space-y-2">
-                  <Label htmlFor="phone">Phone Number</Label>
+                  <Label htmlFor="email">College Email ID</Label>
                   <div className="relative">
-                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                      id="phone"
-                      type="tel"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="e.g. 9876543210"
+                      id="email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder={`e.g. name@${ALLOWED_EMAIL_DOMAIN}`}
                       className="pl-10"
                       required
                     />
                   </div>
+                  <p className="text-xs text-muted-foreground">Only @{ALLOWED_EMAIL_DOMAIN} emails are accepted</p>
                 </div>
 
                 <Button type="submit" className="w-full" disabled={loading}>
@@ -349,6 +359,7 @@ const Login = () => {
                       </InputOTPGroup>
                     </InputOTP>
                   </div>
+                  <p className="text-xs text-muted-foreground text-center">OTP expires in 5 minutes</p>
                 </div>
 
                 <Button type="submit" className="w-full" disabled={loading || otp.length !== 6}>
