@@ -33,7 +33,7 @@ Deno.serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // ─── VALIDATE CREDENTIALS ───
+    // ─── VALIDATE CREDENTIALS (check if user exists, return is_verified status) ───
     if (action === "validate_credentials") {
       const { roll_number, phone, role } = body;
 
@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
 
       const { data: profile } = await supabaseAdmin
         .from("profiles")
-        .select("id, user_id, full_name, roll_number, phone")
+        .select("id, user_id, full_name, roll_number, phone, is_verified")
         .eq("roll_number", roll_number)
         .eq("phone", phone)
         .maybeSingle();
@@ -65,7 +65,11 @@ Deno.serve(async (req) => {
         }, 403);
       }
 
-      return jsonResponse({ success: true, message: "Credentials validated" });
+      return jsonResponse({
+        success: true,
+        message: "Credentials validated",
+        is_verified: profile.is_verified,
+      });
     }
 
     // ─── SEND OTP ───
@@ -76,7 +80,6 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "Please enter a valid phone number" }, 400);
       }
 
-      // Check if phone exists in profiles
       const { data: profile } = await supabaseAdmin
         .from("profiles")
         .select("id, full_name, roll_number")
@@ -87,33 +90,29 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "No account found with this phone number. Contact your administrator." }, 404);
       }
 
-      // Invalidate any existing unused OTPs for this phone
       await supabaseAdmin
         .from("otp_codes")
         .update({ used: true })
         .eq("phone", phone)
         .eq("used", false);
 
-      // Generate and store OTP
       const code = generateOTP();
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 minutes
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
       await supabaseAdmin
         .from("otp_codes")
         .insert({ phone, code, expires_at: expiresAt });
 
-      // In production, send SMS via Twilio/etc. For now, log it.
       console.log(`OTP for ${phone}: ${code}`);
 
       return jsonResponse({
         success: true,
         message: "OTP sent successfully",
-        // Include OTP in response for testing (remove in production)
         otp_debug: code,
       });
     }
 
-    // ─── VERIFY OTP ───
+    // ─── VERIFY OTP (returns temporary token, does NOT create session yet) ───
     if (action === "verify_otp") {
       const { phone, otp, role } = body;
 
@@ -121,7 +120,6 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "Phone and OTP are required" }, 400);
       }
 
-      // Find valid OTP
       const { data: otpRecord } = await supabaseAdmin
         .from("otp_codes")
         .select("*")
@@ -137,13 +135,11 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "Invalid or expired OTP. Please try again." }, 401);
       }
 
-      // Mark OTP as used
       await supabaseAdmin
         .from("otp_codes")
         .update({ used: true })
         .eq("id", otpRecord.id);
 
-      // Fetch profile
       const { data: profile } = await supabaseAdmin
         .from("profiles")
         .select("*")
@@ -154,7 +150,135 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "User profile not found" }, 404);
       }
 
-      // Fetch roles
+      // Check if user is already verified — if so, just sign them in
+      if (profile.is_verified) {
+        const syntheticEmail = `${profile.roll_number!.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
+        const syntheticPassword = `cv_${phone}_${profile.roll_number}`;
+
+        const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
+          email: syntheticEmail,
+          password: syntheticPassword,
+        });
+
+        if (authError) {
+          return jsonResponse({ error: "Authentication failed. Contact your administrator." }, 401);
+        }
+
+        const { data: userRoles } = await supabaseAdmin
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", profile.user_id);
+
+        return jsonResponse({
+          session: authData.session,
+          profile,
+          roles: userRoles?.map((r: any) => r.role) ?? [],
+          selectedRole: role,
+          needs_password: false,
+        });
+      }
+
+      // Not verified — OTP passed, now user needs to set password
+      return jsonResponse({
+        success: true,
+        needs_password: true,
+        otp_verified: true,
+        phone,
+        roll_number: profile.roll_number,
+        user_id: profile.user_id,
+      });
+    }
+
+    // ─── SET PASSWORD (first-time setup after OTP) ───
+    if (action === "set_password") {
+      const { phone, roll_number, password } = body;
+
+      if (!phone || !roll_number || !password) {
+        return jsonResponse({ error: "Phone, roll number, and password are required" }, 400);
+      }
+
+      if (password.length < 6) {
+        return jsonResponse({ error: "Password must be at least 6 characters" }, 400);
+      }
+
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("*")
+        .eq("roll_number", roll_number)
+        .eq("phone", phone)
+        .maybeSingle();
+
+      if (!profile) {
+        return jsonResponse({ error: "Profile not found" }, 404);
+      }
+
+      if (profile.is_verified) {
+        return jsonResponse({ error: "Account already verified. Please login with your password." }, 400);
+      }
+
+      // Update the synthetic password to the user-chosen password
+      const syntheticEmail = `${roll_number.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
+
+      const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(profile.user_id, {
+        password: password,
+      });
+
+      if (updateError) {
+        console.error("Set password error:", updateError.message);
+        return jsonResponse({ error: "Failed to set password. Please try again." }, 500);
+      }
+
+      // Mark as verified
+      await supabaseAdmin
+        .from("profiles")
+        .update({ is_verified: true })
+        .eq("user_id", profile.user_id);
+
+      // Sign in with new password
+      const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
+        email: syntheticEmail,
+        password: password,
+      });
+
+      if (authError) {
+        return jsonResponse({ error: "Password set but login failed. Try logging in with your password." }, 500);
+      }
+
+      const { data: userRoles } = await supabaseAdmin
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", profile.user_id);
+
+      return jsonResponse({
+        session: authData.session,
+        profile: { ...profile, is_verified: true },
+        roles: userRoles?.map((r: any) => r.role) ?? [],
+        selectedRole: body.role,
+      });
+    }
+
+    // ─── PASSWORD LOGIN (returning users) ───
+    if (action === "password_login") {
+      const { roll_number, password, role } = body;
+
+      if (!roll_number || !password || !role) {
+        return jsonResponse({ error: "Roll number, password, and role are required" }, 400);
+      }
+
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("*")
+        .eq("roll_number", roll_number)
+        .maybeSingle();
+
+      if (!profile) {
+        return jsonResponse({ error: "Invalid roll number. No account found." }, 401);
+      }
+
+      if (!profile.is_verified) {
+        return jsonResponse({ error: "Account not verified. Please use OTP verification first." }, 403);
+      }
+
       const { data: userRoles } = await supabaseAdmin
         .from("user_roles")
         .select("role")
@@ -162,30 +286,32 @@ Deno.serve(async (req) => {
 
       const rolesList = userRoles?.map((r: any) => r.role) ?? [];
 
-      // Sign in using synthetic credentials
-      const syntheticEmail = `${profile.roll_number!.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
-      const syntheticPassword = `cv_${phone}_${profile.roll_number}`;
+      if (!rolesList.includes(role)) {
+        return jsonResponse({
+          error: `You are not registered as a ${role.replace('_', ' ')}. Please select the correct role.`
+        }, 403);
+      }
+
+      const syntheticEmail = `${roll_number.toLowerCase().replace(/[^a-z0-9]/g, "")}@campusvote.local`;
 
       const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
         email: syntheticEmail,
-        password: syntheticPassword,
+        password: password,
       });
 
       if (authError) {
-        console.error("Auth error:", authError.message);
-        return jsonResponse({ error: "Authentication failed. Contact your administrator." }, 401);
+        return jsonResponse({ error: "Invalid password. Please try again." }, 401);
       }
 
       return jsonResponse({
         session: authData.session,
-        user: authData.user,
         profile,
         roles: rolesList,
-        selectedRole: role || rolesList[0],
+        selectedRole: role,
       });
     }
 
-    // ─── LOGIN ───
+    // ─── LOGIN (legacy) ───
     if (action === "login") {
       const { roll_number, phone, role } = body;
 
@@ -197,15 +323,15 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "Please select your role" }, 400);
       }
 
-      const { data: profile, error: profileError } = await supabaseAdmin
+      const { data: profile } = await supabaseAdmin
         .from("profiles")
         .select("*")
         .eq("roll_number", roll_number)
         .eq("phone", phone)
         .maybeSingle();
 
-      if (profileError || !profile) {
-        return jsonResponse({ error: "Invalid roll number or phone number. Please check your credentials." }, 401);
+      if (!profile) {
+        return jsonResponse({ error: "Invalid roll number or phone number." }, 401);
       }
 
       const { data: userRoles } = await supabaseAdmin
@@ -216,8 +342,8 @@ Deno.serve(async (req) => {
       const rolesList = userRoles?.map((r: any) => r.role) ?? [];
 
       if (!rolesList.includes(role)) {
-        return jsonResponse({ 
-          error: `You are not registered as a ${role.replace('_', ' ')}. Please select the correct role.` 
+        return jsonResponse({
+          error: `You are not registered as a ${role.replace('_', ' ')}. Please select the correct role.`
         }, 403);
       }
 
@@ -230,13 +356,11 @@ Deno.serve(async (req) => {
       });
 
       if (authError) {
-        console.error("Auth error:", authError.message);
         return jsonResponse({ error: "Authentication failed. Contact your administrator." }, 401);
       }
 
       return jsonResponse({
         session: authData.session,
-        user: authData.user,
         profile,
         roles: rolesList,
         selectedRole: role,
@@ -288,7 +412,6 @@ Deno.serve(async (req) => {
       });
 
       if (createError) {
-        console.error("Create user error:", createError.message);
         return jsonResponse({ error: "Failed to create user: " + createError.message }, 500);
       }
 
@@ -316,7 +439,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ success: true, user_id: newUser.user.id });
     }
 
-    // ─── SEED USERS (one-time setup) ───
+    // ─── SEED USERS ───
     if (action === "seed_users") {
       const users = [
         { name: "Rahul Sharma", roll: "CS2024001", phone: "9876543001", role: "student", userClass: "CS-A" },
