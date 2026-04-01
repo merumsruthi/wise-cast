@@ -1,4 +1,4 @@
-import { Vote, LayoutDashboard, Users, Trophy, LogOut, Settings, GraduationCap, Shield, BookOpen } from "lucide-react";
+import { Vote, LayoutDashboard, Users, Trophy, LogOut, Settings, GraduationCap, Shield, BookOpen, FileText } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
