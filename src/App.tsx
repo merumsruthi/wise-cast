@@ -15,6 +15,8 @@ import AdminResults from "./pages/AdminResults";
 import TeacherDashboard from "./pages/TeacherDashboard";
 import TeacherElections from "./pages/TeacherElections";
 import TeacherResults from "./pages/TeacherResults";
+import AdminNominations from "./pages/AdminNominations";
+import StudentNominations from "./pages/StudentNominations";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -48,6 +50,8 @@ const App = () => (
             <Route path="/dashboard/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
             <Route path="/dashboard/admin/elections" element={<ProtectedRoute><AdminElections /></ProtectedRoute>} />
             <Route path="/dashboard/admin/results" element={<ProtectedRoute><AdminResults /></ProtectedRoute>} />
+            <Route path="/dashboard/admin/nominations" element={<ProtectedRoute><AdminNominations /></ProtectedRoute>} />
+            <Route path="/dashboard/nominations" element={<ProtectedRoute><StudentNominations /></ProtectedRoute>} />
             <Route path="/dashboard/teacher" element={<ProtectedRoute><TeacherDashboard /></ProtectedRoute>} />
             <Route path="/dashboard/teacher/elections" element={<ProtectedRoute><TeacherElections /></ProtectedRoute>} />
             <Route path="/dashboard/teacher/results" element={<ProtectedRoute><TeacherResults /></ProtectedRoute>} />

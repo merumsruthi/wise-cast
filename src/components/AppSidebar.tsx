@@ -1,4 +1,4 @@
-import { Vote, LayoutDashboard, Users, Trophy, LogOut, Settings, GraduationCap, Shield, BookOpen } from "lucide-react";
+import { Vote, LayoutDashboard, Users, Trophy, LogOut, Settings, GraduationCap, Shield, BookOpen, FileText } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -41,12 +41,14 @@ export function AppSidebar() {
   const studentItems = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
     { title: "Elections", url: "/dashboard/elections", icon: Vote },
+    { title: "Nominations", url: "/dashboard/nominations", icon: FileText },
   ];
 
   const adminItems = [
     { title: "Admin Dashboard", url: "/dashboard/admin", icon: Settings },
     { title: "Manage Elections", url: "/dashboard/admin/elections", icon: Vote },
     { title: "Results", url: "/dashboard/admin/results", icon: Trophy },
+    { title: "Nominations", url: "/dashboard/admin/nominations", icon: FileText },
   ];
 
   const teacherItems = [
