@@ -97,6 +97,131 @@ export type Database = {
         }
         Relationships: []
       }
+      nomination_applications: {
+        Row: {
+          achievements: string | null
+          class: string
+          created_at: string
+          election_id: string
+          id: string
+          message: string | null
+          photo_url: string | null
+          role_id: string
+          roll_number: string
+          status: string
+          student_name: string
+          user_id: string
+          year: string
+        }
+        Insert: {
+          achievements?: string | null
+          class: string
+          created_at?: string
+          election_id: string
+          id?: string
+          message?: string | null
+          photo_url?: string | null
+          role_id: string
+          roll_number: string
+          status?: string
+          student_name: string
+          user_id: string
+          year: string
+        }
+        Update: {
+          achievements?: string | null
+          class?: string
+          created_at?: string
+          election_id?: string
+          id?: string
+          message?: string | null
+          photo_url?: string | null
+          role_id?: string
+          roll_number?: string
+          status?: string
+          student_name?: string
+          user_id?: string
+          year?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nomination_applications_election_id_fkey"
+            columns: ["election_id"]
+            isOneToOne: false
+            referencedRelation: "nomination_elections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nomination_applications_role_id_fkey"
+            columns: ["role_id"]
+            isOneToOne: false
+            referencedRelation: "nomination_roles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      nomination_elections: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          description: string | null
+          end_date: string
+          id: string
+          is_active: boolean
+          start_date: string
+          title: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          end_date: string
+          id?: string
+          is_active?: boolean
+          start_date: string
+          title: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          end_date?: string
+          id?: string
+          is_active?: boolean
+          start_date?: string
+          title?: string
+        }
+        Relationships: []
+      }
+      nomination_roles: {
+        Row: {
+          created_at: string
+          election_id: string
+          id: string
+          role_name: string
+        }
+        Insert: {
+          created_at?: string
+          election_id: string
+          id?: string
+          role_name: string
+        }
+        Update: {
+          created_at?: string
+          election_id?: string
+          id?: string
+          role_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nomination_roles_election_id_fkey"
+            columns: ["election_id"]
+            isOneToOne: false
+            referencedRelation: "nomination_elections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       otp_codes: {
         Row: {
           code: string
