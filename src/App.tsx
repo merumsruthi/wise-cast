@@ -15,6 +15,8 @@ import AdminResults from "./pages/AdminResults";
 import TeacherDashboard from "./pages/TeacherDashboard";
 import TeacherElections from "./pages/TeacherElections";
 import TeacherResults from "./pages/TeacherResults";
+import AdminNominations from "./pages/AdminNominations";
+import StudentNominations from "./pages/StudentNominations";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
