@@ -48,6 +48,7 @@ export function AppSidebar() {
     { title: "Admin Dashboard", url: "/dashboard/admin", icon: Settings },
     { title: "Manage Elections", url: "/dashboard/admin/elections", icon: Vote },
     { title: "Results", url: "/dashboard/admin/results", icon: Trophy },
+    { title: "Nominations", url: "/dashboard/admin/nominations", icon: FileText },
   ];
 
   const teacherItems = [
