@@ -41,6 +41,7 @@ export function AppSidebar() {
   const studentItems = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
     { title: "Elections", url: "/dashboard/elections", icon: Vote },
+    { title: "Nominations", url: "/dashboard/nominations", icon: FileText },
   ];
 
   const adminItems = [
