@@ -201,6 +201,15 @@ const AdminNominations = () => {
     }
   };
 
+  const linkVotingElection = async (nomElectionId: string, targetId: string) => {
+    const { error } = await supabase.from("nomination_elections").update({ target_election_id: targetId } as any).eq("id", nomElectionId);
+    if (error) toast.error("Failed to link voting election.");
+    else {
+      toast.success("Voting election linked!");
+      fetchAll();
+    }
+  };
+
   const electionRoles = (elId: string) => roles.filter(r => r.election_id === elId);
   const electionApps = (elId: string) => applications.filter(a => a.election_id === elId);
   const getRoleName = (roleId: string) => roles.find(r => r.id === roleId)?.role_name || "Unknown";
