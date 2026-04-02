@@ -27,6 +27,14 @@ interface NominationElection {
   end_date: string;
   is_active: boolean;
   created_at: string;
+  target_election_id: string | null;
+}
+
+interface VotingElection {
+  id: string;
+  title: string;
+  election_type: string;
+  class: string | null;
 }
 
 interface NominationRole {
