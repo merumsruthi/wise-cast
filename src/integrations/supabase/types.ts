@@ -169,6 +169,7 @@ export type Database = {
           id: string
           is_active: boolean
           start_date: string
+          target_election_id: string | null
           title: string
         }
         Insert: {
@@ -179,6 +180,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           start_date: string
+          target_election_id?: string | null
           title: string
         }
         Update: {
@@ -189,9 +191,18 @@ export type Database = {
           id?: string
           is_active?: boolean
           start_date?: string
+          target_election_id?: string | null
           title?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "nomination_elections_target_election_id_fkey"
+            columns: ["target_election_id"]
+            isOneToOne: false
+            referencedRelation: "elections"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       nomination_roles: {
         Row: {

@@ -27,6 +27,14 @@ interface NominationElection {
   end_date: string;
   is_active: boolean;
   created_at: string;
+  target_election_id: string | null;
+}
+
+interface VotingElection {
+  id: string;
+  title: string;
+  election_type: string;
+  class: string | null;
 }
 
 interface NominationRole {
@@ -54,6 +62,7 @@ interface NominationApplication {
 const AdminNominations = () => {
   const { user } = useAuth();
   const [elections, setElections] = useState<NominationElection[]>([]);
+  const [votingElections, setVotingElections] = useState<VotingElection[]>([]);
   const [roles, setRoles] = useState<NominationRole[]>([]);
   const [applications, setApplications] = useState<NominationApplication[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,14 +79,16 @@ const AdminNominations = () => {
 
   const fetchAll = async () => {
     setLoading(true);
-    const [elRes, roleRes, appRes] = await Promise.all([
+    const [elRes, roleRes, appRes, votingRes] = await Promise.all([
       supabase.from("nomination_elections").select("*").order("created_at", { ascending: false }),
       supabase.from("nomination_roles").select("*"),
       supabase.from("nomination_applications").select("*").order("created_at", { ascending: false }),
+      supabase.from("elections").select("id, title, election_type, class").order("created_at", { ascending: false }),
     ]);
     if (elRes.data) setElections(elRes.data as NominationElection[]);
     if (roleRes.data) setRoles(roleRes.data as NominationRole[]);
     if (appRes.data) setApplications(appRes.data as NominationApplication[]);
+    if (votingRes.data) setVotingElections(votingRes.data as VotingElection[]);
     setLoading(false);
   };
 
@@ -138,12 +149,46 @@ const AdminNominations = () => {
   };
 
   const updateApplicationStatus = async (appId: string, status: string) => {
+    const app = applications.find(a => a.id === appId);
+    if (!app) return;
+
     const { error } = await supabase.from("nomination_applications").update({ status }).eq("id", appId);
-    if (error) toast.error("Failed to update application.");
-    else {
+    if (error) { toast.error("Failed to update application."); return; }
+
+    // Find the nomination election and its linked voting election
+    const nomElection = elections.find(e => e.id === app.election_id);
+    const targetElectionId = nomElection?.target_election_id;
+
+    if (status === "approved" && targetElectionId) {
+      const roleName = getRoleName(app.role_id);
+      // Upsert into candidates table so voting works
+      const { error: candErr } = await supabase.from("candidates").upsert({
+        id: app.id, // use same ID for consistency
+        election_id: targetElectionId,
+        name: app.student_name,
+        role_title: roleName,
+        class: app.class,
+        manifesto: app.message,
+        photo_url: app.photo_url,
+        user_id: app.user_id,
+      }, { onConflict: "id" });
+      if (candErr) {
+        console.error("Failed to sync candidate:", candErr);
+        toast.error("Application approved but failed to sync to candidates. Check console.");
+      } else {
+        toast.success("Application approved & candidate synced for voting!");
+      }
+    } else if (status === "rejected") {
+      // Remove from candidates if previously approved
+      await supabase.from("candidates").delete().eq("id", appId);
+      toast.success("Application rejected.");
+    } else if (status === "approved" && !targetElectionId) {
+      toast.success("Application approved. Link a voting election to sync candidates.");
+    } else {
       toast.success(`Application ${status}.`);
-      fetchAll();
     }
+
+    fetchAll();
   };
 
   const deleteElection = async (id: string) => {
@@ -152,6 +197,15 @@ const AdminNominations = () => {
     else {
       toast.success("Election deleted.");
       if (selectedElection === id) setSelectedElection(null);
+      fetchAll();
+    }
+  };
+
+  const linkVotingElection = async (nomElectionId: string, targetId: string) => {
+    const { error } = await supabase.from("nomination_elections").update({ target_election_id: targetId } as any).eq("id", nomElectionId);
+    if (error) toast.error("Failed to link voting election.");
+    else {
+      toast.success("Voting election linked!");
       fetchAll();
     }
   };
@@ -297,15 +351,55 @@ const AdminNominations = () => {
                         <p>🎭 {eRoles.length} roles: {eRoles.map(r => r.role_name).join(", ")}</p>
                         <p>📋 {apps.length} applications</p>
                       </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs text-muted-foreground">Link to Voting Election</Label>
+                        <Select
+                          value={el.target_election_id ?? ""}
+                          onValueChange={(v) => linkVotingElection(el.id, v)}
+                        >
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue placeholder="Select voting election..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {votingElections.map(ve => (
+                              <SelectItem key={ve.id} value={ve.id}>{ve.title}{ve.class ? ` (${ve.class})` : ''}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <div className="flex items-center gap-2">
                         <Switch checked={el.is_active} onCheckedChange={() => toggleActive(el.id, el.is_active)} />
                         <span className="text-sm text-muted-foreground">{el.is_active ? "Active" : "Disabled"}</span>
                       </div>
                     </CardContent>
-                    <CardFooter className="gap-2">
+                    <CardFooter className="gap-2 flex-wrap">
                       <Button size="sm" variant="outline" onClick={() => setSelectedElection(el.id)}>
                         <Users className="h-4 w-4 mr-1" /> View Applications
                       </Button>
+                      {el.target_election_id && (
+                        <Button size="sm" variant="outline" onClick={async () => {
+                          const approved = electionApps(el.id).filter(a => a.status === "approved");
+                          if (approved.length === 0) { toast.error("No approved applications to sync."); return; }
+                          let synced = 0;
+                          for (const app of approved) {
+                            const roleName = getRoleName(app.role_id);
+                            const { error } = await supabase.from("candidates").upsert({
+                              id: app.id,
+                              election_id: el.target_election_id!,
+                              name: app.student_name,
+                              role_title: roleName,
+                              class: app.class,
+                              manifesto: app.message,
+                              photo_url: app.photo_url,
+                              user_id: app.user_id,
+                            }, { onConflict: "id" });
+                            if (!error) synced++;
+                          }
+                          toast.success(`${synced}/${approved.length} candidates synced to voting election.`);
+                        }}>
+                          <CheckCircle className="h-4 w-4 mr-1" /> Sync Approved ({electionApps(el.id).filter(a => a.status === "approved").length})
+                        </Button>
+                      )}
                       <Button size="sm" variant="ghost" className="text-destructive" onClick={() => deleteElection(el.id)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
