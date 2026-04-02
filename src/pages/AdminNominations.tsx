@@ -351,6 +351,22 @@ const AdminNominations = () => {
                         <p>🎭 {eRoles.length} roles: {eRoles.map(r => r.role_name).join(", ")}</p>
                         <p>📋 {apps.length} applications</p>
                       </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs text-muted-foreground">Link to Voting Election</Label>
+                        <Select
+                          value={el.target_election_id ?? ""}
+                          onValueChange={(v) => linkVotingElection(el.id, v)}
+                        >
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue placeholder="Select voting election..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {votingElections.map(ve => (
+                              <SelectItem key={ve.id} value={ve.id}>{ve.title}{ve.class ? ` (${ve.class})` : ''}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <div className="flex items-center gap-2">
                         <Switch checked={el.is_active} onCheckedChange={() => toggleActive(el.id, el.is_active)} />
                         <span className="text-sm text-muted-foreground">{el.is_active ? "Active" : "Disabled"}</span>
