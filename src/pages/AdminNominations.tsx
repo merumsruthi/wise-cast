@@ -79,14 +79,16 @@ const AdminNominations = () => {
 
   const fetchAll = async () => {
     setLoading(true);
-    const [elRes, roleRes, appRes] = await Promise.all([
+    const [elRes, roleRes, appRes, votingRes] = await Promise.all([
       supabase.from("nomination_elections").select("*").order("created_at", { ascending: false }),
       supabase.from("nomination_roles").select("*"),
       supabase.from("nomination_applications").select("*").order("created_at", { ascending: false }),
+      supabase.from("elections").select("id, title, election_type, class").order("created_at", { ascending: false }),
     ]);
     if (elRes.data) setElections(elRes.data as NominationElection[]);
     if (roleRes.data) setRoles(roleRes.data as NominationRole[]);
     if (appRes.data) setApplications(appRes.data as NominationApplication[]);
+    if (votingRes.data) setVotingElections(votingRes.data as VotingElection[]);
     setLoading(false);
   };
 
