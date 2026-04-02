@@ -1,0 +1,1 @@
+ALTER TABLE public.nomination_elections ADD COLUMN target_election_id uuid REFERENCES public.elections(id) ON DELETE SET NULL;
