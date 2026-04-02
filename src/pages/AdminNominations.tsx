@@ -62,6 +62,7 @@ interface NominationApplication {
 const AdminNominations = () => {
   const { user } = useAuth();
   const [elections, setElections] = useState<NominationElection[]>([]);
+  const [votingElections, setVotingElections] = useState<VotingElection[]>([]);
   const [roles, setRoles] = useState<NominationRole[]>([]);
   const [applications, setApplications] = useState<NominationApplication[]>([]);
   const [loading, setLoading] = useState(true);
