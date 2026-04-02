@@ -372,10 +372,34 @@ const AdminNominations = () => {
                         <span className="text-sm text-muted-foreground">{el.is_active ? "Active" : "Disabled"}</span>
                       </div>
                     </CardContent>
-                    <CardFooter className="gap-2">
+                    <CardFooter className="gap-2 flex-wrap">
                       <Button size="sm" variant="outline" onClick={() => setSelectedElection(el.id)}>
                         <Users className="h-4 w-4 mr-1" /> View Applications
                       </Button>
+                      {el.target_election_id && (
+                        <Button size="sm" variant="outline" onClick={async () => {
+                          const approved = electionApps(el.id).filter(a => a.status === "approved");
+                          if (approved.length === 0) { toast.error("No approved applications to sync."); return; }
+                          let synced = 0;
+                          for (const app of approved) {
+                            const roleName = getRoleName(app.role_id);
+                            const { error } = await supabase.from("candidates").upsert({
+                              id: app.id,
+                              election_id: el.target_election_id!,
+                              name: app.student_name,
+                              role_title: roleName,
+                              class: app.class,
+                              manifesto: app.message,
+                              photo_url: app.photo_url,
+                              user_id: app.user_id,
+                            }, { onConflict: "id" });
+                            if (!error) synced++;
+                          }
+                          toast.success(`${synced}/${approved.length} candidates synced to voting election.`);
+                        }}>
+                          <CheckCircle className="h-4 w-4 mr-1" /> Sync Approved ({electionApps(el.id).filter(a => a.status === "approved").length})
+                        </Button>
+                      )}
                       <Button size="sm" variant="ghost" className="text-destructive" onClick={() => deleteElection(el.id)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
