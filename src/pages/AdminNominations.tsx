@@ -149,12 +149,46 @@ const AdminNominations = () => {
   };
 
   const updateApplicationStatus = async (appId: string, status: string) => {
+    const app = applications.find(a => a.id === appId);
+    if (!app) return;
+
     const { error } = await supabase.from("nomination_applications").update({ status }).eq("id", appId);
-    if (error) toast.error("Failed to update application.");
-    else {
+    if (error) { toast.error("Failed to update application."); return; }
+
+    // Find the nomination election and its linked voting election
+    const nomElection = elections.find(e => e.id === app.election_id);
+    const targetElectionId = nomElection?.target_election_id;
+
+    if (status === "approved" && targetElectionId) {
+      const roleName = getRoleName(app.role_id);
+      // Upsert into candidates table so voting works
+      const { error: candErr } = await supabase.from("candidates").upsert({
+        id: app.id, // use same ID for consistency
+        election_id: targetElectionId,
+        name: app.student_name,
+        role_title: roleName,
+        class: app.class,
+        manifesto: app.message,
+        photo_url: app.photo_url,
+        user_id: app.user_id,
+      }, { onConflict: "id" });
+      if (candErr) {
+        console.error("Failed to sync candidate:", candErr);
+        toast.error("Application approved but failed to sync to candidates. Check console.");
+      } else {
+        toast.success("Application approved & candidate synced for voting!");
+      }
+    } else if (status === "rejected") {
+      // Remove from candidates if previously approved
+      await supabase.from("candidates").delete().eq("id", appId);
+      toast.success("Application rejected.");
+    } else if (status === "approved" && !targetElectionId) {
+      toast.success("Application approved. Link a voting election to sync candidates.");
+    } else {
       toast.success(`Application ${status}.`);
-      fetchAll();
     }
+
+    fetchAll();
   };
 
   const deleteElection = async (id: string) => {
